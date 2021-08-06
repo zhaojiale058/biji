@@ -1,0 +1,95 @@
+（1）终端查找用过的命令
+（2）debian 下软件自动安装依赖
+（3）cmake 编译 安装到指定的目录下
+（4）yum 下载源代码
+（5）vim 快捷键
+（6）查看 gcc 的宏
+（7）打开ssh服务
+（8）如何手动将sudo加入账户中
+（9）在终端中写脚本
+（10）查看 window 的信息
+（11）查看支持的所有字体
+（12）查看 xv 的信息
+（13）查看 x 的扩展信息
+（14）alias 别名设定
+（15）编译生成符号表
+（16）grep 指定文件搜索
+（17）git 如何生成指定两次 commit 之间的 patch
+（18）[loongson@localhost study]$ gcc  circular.c -o  circular -lGL -lGLU -lglut
+      /usr/bin/ld: /tmp/ccCHRPQ6.o: undefined reference to symbol 'sin@@GLIBC_2.0'
+      /lib64/libm.so.6: error adding symbols: DSO missing from command line
+      collect2: 错误：ld 返回 1
+（19）7z 解压和压缩
+
+（1）在终端中 ctrl+r 可查找之前用过的命令，然后 Tab 补全。
+
+（2）sudo apt-get build-dep ***软件名***
+
+（3）cmake -DCMAKE_INSTALL_PREFIX=/自己的目录/
+    make -j8     make install
+
+（4）yumdownloader --source ......
+
+（5）vim 快捷键：
+    Tlist: 在左侧列出当前文件中的函数树
+    NERDTree：在右侧列出工程中本级目录的所有文件 = F3
+    gg：回到本文件顶部
+    GG：跳到本文件底部
+
+（6）查看 gcc 的宏：gcc -E -dM -x c /dev/null | grep mips
+
+（7）打开ssh服务：#: service sshd start (当前有效，不永久有效)
+    自启动开启ssh服务：systemctl start sshd(启动ssh服务)
+                    systemctl status sshd(查看启动状态)
+                    systemctl enable sshd (自启动开启ssh服务)
+
+（8）如何手动将sudo加入账户中：
+    切换到root用户，修改配置文件 /etc/sudoers，增加如下配置：
+    ## Next comes the main part: which users can run what software on 
+    ## which machines (the sudoers file can be shared between multiple
+    ## systems).
+    ## Syntax:
+    ##
+    ##      user    MACHINE=COMMANDS
+    ##
+    ## The COMMANDS section may have other options added to it.
+    ##
+    ## Allow root to run any commands anywhere 
+    root    ALL=(ALL)       ALL
+    loongson        ALL=(ALL)       ALL   <---增加一行配置
+
+（9）$:while : ; do
+    > ls /home  | grep 自己想要过滤的东西
+    > sleep 1
+    > done
+
+（10）查看 window 的信息： 
+     $: xwininfo
+    
+（11）查看所有支持的字体： 
+     $: xlsfonts
+    xfontsel (没有的要安装命令)程序显示字体的字形，并允许用户选择字体名称以将其粘贴到另一个窗口中。
+
+（12）查看xv的信息：$:xvinfo
+
+（13）查看 x 的扩展信息：$: xdpyinfo
+
+（14）alias 别名设定：
+     $:vim ~/.bashrc  ——> 写入别名 ——> source ~/.bashrc  生效
+
+（15）编译生成符号表：$: CFLAGS='-O0 -g3' ./configure 
+
+（16）grep 指定文件搜索： grep "context" . -nr --include *.{c,h}   必须要加上 .   -r 表示搜索的是目录 n 表示加上行号
+
+（17）git format-patch aaaaaaa..bbbbbbb      aaaaaaa 为 base commit   bbbbbbb 为 latest commit
+
+（18）[loongson@localhost study]$ gcc  circular.c -o  circular -lGL -lGLU -lglut
+      /usr/bin/ld: /tmp/ccCHRPQ6.o: undefined reference to symbol 'sin@@GLIBC_2.0'
+      /lib64/libm.so.6: error adding symbols: DSO missing from command line
+      collect2: 错误：ld 返回 1
+    
+      解决：调用sin cos函数需要加载 libm.os, 加上 -lm 链接上就行了。
+
+（19）7z 解压：7z x 1.7z
+       压缩：7z a 1 1.7z
+

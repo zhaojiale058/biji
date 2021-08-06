@@ -1,0 +1,18 @@
+1.glx是什么
+glx是个扩展，是连接 x window 和 OpenGL 之间的桥梁，可使能加载，也可以不使用。
+glx既是opengl的x窗口系统依赖编程接口的名称，也是opengl的x扩展协议的名称
+
+2.为何有glx扩展
+
+
+glx 库解决了 x window 中 OpenGL 图形渲染问题。同样，WGL 和 AGL 库分别解决了 MS Windows 
+和 Mac OS 窗口系统中的 OpenGL 图形渲染问题
+
+
+3.glx与xserver之间的调用实现
+
+
+
+
+
+4.glx与mesa的之间的调用实现

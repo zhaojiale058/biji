@@ -1,0 +1,281 @@
+intel:
+glamor 支持 OpenGL/EGL/GBM 支持的各种图形芯片组。
+一个基于 gl 的X服务器渲染加速库:
+    它使用 GL 函数和着色器来完成 2D 图形操作。
+    如果可能的话，它使用法线纹理来表示一个可绘制的像素图。
+
+它调用 GL 函数来直接渲染纹理。它与硬件无关。并且可以是任何 X 服务器的 DDX 驱动程序的构建块:
+    Xorg 的 DDX 驱动程序可以利用 glamor-egl 包在没有任何本机X系统的情况下创建 egl 上下文。xf86-video-modesetting 驱动程序默认使用 glamor，
+    但其他驱动程序也支持它(xf86-video-ati和xf86-video-intel)。这个包可以支持所有拥有 OpenGL、gbm 和 drm 库的平台。
+    
+长期以来，我们一直听到人们抱怨为什么我们需要为一个图形设备开发两个版本的驱动程序。一个是 mesa 的 DRI 驱动程序，另一个是 2D DDX 驱动程序。的目的之一就是消除后者。
+
+在 Xorg 中，上层应该总是使用底层的 DDX 函数来处理渲染，而不是直接访问绘制的对象。常见的逻辑的 DDX :设置适当的 2d 或 3d 渲染管道根据请求直接绘制和渲染,
+将准备一个串行硬件相关的命令,然后上传的命令通过 DRM 图形设备接口,如果失败或功能没有实现, DDX 将映射 drawable 到虚拟内存缓冲区,然后使用 fb 函数使用软件来绘制和渲染它。
+
+Glamor 也有类似的逻辑，但用 GL 的管道替换 2D 或 3D 管道设置。在大多数情况下，pixmap 和 window 都有一个普通的 texture object。当进行渲染或绘制过程时， texture object 将被
+绑定到一个 frame buffer object,因此所有后续的绘制和渲染操作可以使用 GL 函数或使用 according shader。我们不需要为每个不同的图形设备设置管道和编写控制代码，GL 将处理它。
+
+如果 GL 类渲染因失败或不支持而无法完成，Glamor 会退回到软件渲染，使用 FB 功能并在需要时上传。此过程需要多次内存复制，并且相对较慢，因此应该将回退情况减至最少。
+Glamor 现在被实现为嵌入到其他 DDX 驱动程序中(到目前为止，只有 xf86-video-intel 支持)，以完成绘制和渲染函数。在这个特性中，Glamor 也将被实现为一个独立的 DDX 驱动程序。
+
+
+确保在 conf/glamor.conf 目录下 /usr/share/x11/xorg.conf 有一个名为 glamor.conf 的 xorg.conf.d 或 /etc/X11/xorg.conf.d /。尽管 make install 将尝试将该文件安装到正确的目录。
+但是它可能会失败，就像您将 xserver 安装到本地目录一样，“make install”会将 glamor.conf 安装到您的本地目录，而不是两个系统目录。因此，您可能需要手动将文件复制到系统的配置目录中。
+否则，在启动 xserver 时将会遇到 segfault。以下是 glamor.conf 的内容。
+
+
+我们之前需要加载 dri2/glamoregl 的原因是 glx-xserver 和 glamor 都是一个 dri2 加载器。glx-xserver 端有自己的 glapi/调度表实现，它是标准 mesa 实现的子集。
+因此，如果 glx 模块在 dri2/glamoregl 之前加载，那么我们将得到一个不完整的调度表，然后在 glamor 中一切都被破坏了。这也是为什么我们需要在构建 mesa 时添加 ——enable-glx-tls 参数，
+因为我们需要保持 mesa 与 Xserver 的行为一致，Xserver 将默认启用 -glx-tls，但 mesa 不会。
+
+
+
+
+
+
+
+
+调用 glTexImage2D:
+
+1. glamor_fbo.c :
+
+static int
+_glamor_create_tex(glamor_screen_private *glamor_priv,
+                   int w, int h, GLenum format)
+
+
+——>
+1>
+        glamor_pixmap_fbo *
+        glamor_create_fbo(glamor_screen_private *glamor_priv,
+                        int w, int h, GLenum format, int flag)
+        {
+            GLint tex = _glamor_create_tex(glamor_priv, w, h, format);
+
+            if (!tex) /* Texture creation failed due to GL_OUT_OF_MEMORY */
+                return NULL;
+
+            return glamor_create_fbo_from_tex(glamor_priv, w, h, format, tex, flag);
+        }
+
+
+    ——>
+    1)
+        PixmapPtr
+        glamor_create_pixmap(ScreenPtr screen, int w, int h, int depth,
+                            unsigned int usage)
+        {
+            PixmapPtr pixmap;
+            glamor_pixmap_private *pixmap_priv;
+            glamor_screen_private *glamor_priv = glamor_get_screen_private(screen);
+            glamor_pixmap_fbo *fbo = NULL;
+            int pitch;
+            GLenum format;
+
+            if (w > 32767 || h > 32767)
+                return NullPixmap;
+
+            if ((usage == GLAMOR_CREATE_PIXMAP_CPU
+                || (usage == CREATE_PIXMAP_USAGE_GLYPH_PICTURE &&
+                    w <= glamor_priv->glyph_max_dim &&
+                    h <= glamor_priv->glyph_max_dim)
+                || (w == 0 && h == 0)
+                || !glamor_check_pixmap_fbo_depth(depth)))
+                return fbCreatePixmap(screen, w, h, depth, usage);
+            else
+                pixmap = fbCreatePixmap(screen, 0, 0, depth, usage);
+
+            pixmap_priv = glamor_get_pixmap_private(pixmap);
+
+            format = gl_iformat_for_pixmap(pixmap);
+
+            pitch = (((w * pixmap->drawable.bitsPerPixel + 7) / 8) + 3) & ~3;
+            screen->ModifyPixmapHeader(pixmap, w, h, 0, 0, pitch, NULL);
+
+            pixmap_priv->type = GLAMOR_TEXTURE_ONLY;
+
+            if (usage == GLAMOR_CREATE_PIXMAP_NO_TEXTURE) {
+                glamor_init_pixmap_private_small(pixmap, pixmap_priv);
+                return pixmap;
+            }
+            else if (usage == GLAMOR_CREATE_NO_LARGE ||
+                glamor_check_fbo_size(glamor_priv, w, h))
+            {
+                glamor_init_pixmap_private_small(pixmap, pixmap_priv);
+                fbo = glamor_create_fbo(glamor_priv, w, h, format, usage);
+            } else {
+                int tile_size = glamor_priv->max_fbo_size;
+                DEBUGF("Create LARGE pixmap %p width %d height %d, tile size %d\n",
+                    pixmap, w, h, tile_size);
+                fbo = glamor_create_fbo_array(glamor_priv, w, h, format, usage,
+                                            tile_size, tile_size, pixmap_priv);
+            }
+
+            if (fbo == NULL) {
+                fbDestroyPixmap(pixmap);
+                return fbCreatePixmap(screen, w, h, depth, usage);
+            }
+
+            glamor_pixmap_attach_fbo(pixmap, fbo);
+
+            return pixmap;
+        }    
+
+
+    2）
+        glamor_pixmap_fbo *
+        glamor_create_fbo_array(glamor_screen_private *glamor_priv,
+                                int w, int h, GLenum format, int flag,
+                                int block_w, int block_h,
+                                glamor_pixmap_private *priv)
+        {
+            int block_wcnt;
+            int block_hcnt;
+            glamor_pixmap_fbo **fbo_array;
+            BoxPtr box_array;
+            int i, j;
+
+            priv->block_w = block_w;
+            priv->block_h = block_h;
+
+            block_wcnt = (w + block_w - 1) / block_w;
+            block_hcnt = (h + block_h - 1) / block_h;
+
+            box_array = calloc(block_wcnt * block_hcnt, sizeof(box_array[0]));
+            if (box_array == NULL)
+                return NULL;
+
+            fbo_array = calloc(block_wcnt * block_hcnt, sizeof(glamor_pixmap_fbo *));
+            if (fbo_array == NULL) {
+                free(box_array);
+                return FALSE;
+            }
+            for (i = 0; i < block_hcnt; i++) {
+                int block_y1, block_y2;
+                int fbo_w, fbo_h;
+
+                block_y1 = i * block_h;
+                block_y2 = (block_y1 + block_h) > h ? h : (block_y1 + block_h);
+                fbo_h = block_y2 - block_y1;
+
+                for (j = 0; j < block_wcnt; j++) {
+                    box_array[i * block_wcnt + j].x1 = j * block_w;
+                    box_array[i * block_wcnt + j].y1 = block_y1;
+                    box_array[i * block_wcnt + j].x2 =
+                        (j + 1) * block_w > w ? w : (j + 1) * block_w;
+                    box_array[i * block_wcnt + j].y2 = block_y2;
+                    fbo_w =
+                        box_array[i * block_wcnt + j].x2 - box_array[i * block_wcnt +
+                                                                    j].x1;
+                    fbo_array[i * block_wcnt + j] = glamor_create_fbo(glamor_priv,
+                                                                    fbo_w, fbo_h,
+                                                                    format,
+                                                                    GLAMOR_CREATE_PIXMAP_FIXUP);
+                    if (fbo_array[i * block_wcnt + j] == NULL)
+                        goto cleanup;
+                }
+            }
+
+            priv->box = box_array[0];
+            priv->box_array = box_array;
+            priv->fbo_array = fbo_array;
+            priv->block_wcnt = block_wcnt;
+            priv->block_hcnt = block_hcnt;
+            return fbo_array[0];
+
+        cleanup:
+            for (i = 0; i < block_wcnt * block_hcnt; i++)
+                if (fbo_array[i])
+                    glamor_destroy_fbo(glamor_priv, fbo_array[i]);
+            free(box_array);
+            free(fbo_array);
+            return NULL;
+        }
+
+
+        3）
+        Bool
+        glamor_pixmap_ensure_fbo(PixmapPtr pixmap, GLenum format, int flag)
+        {
+            glamor_screen_private *glamor_priv;
+            glamor_pixmap_private *pixmap_priv;
+            glamor_pixmap_fbo *fbo;
+
+            glamor_priv = glamor_get_screen_private(pixmap->drawable.pScreen);
+            pixmap_priv = glamor_get_pixmap_private(pixmap);
+            if (pixmap_priv->fbo == NULL) {
+
+                fbo = glamor_create_fbo(glamor_priv, pixmap->drawable.width,
+                                        pixmap->drawable.height, format, flag);
+                if (fbo == NULL)
+                    return FALSE;
+
+                glamor_pixmap_attach_fbo(pixmap, fbo);
+            }
+            else {
+                /* We do have a fbo, but it may lack of fb or tex. */
+                if (!pixmap_priv->fbo->tex)
+                    pixmap_priv->fbo->tex =
+                        _glamor_create_tex(glamor_priv, pixmap->drawable.width,
+                                        pixmap->drawable.height, format);
+
+                if (flag != GLAMOR_CREATE_FBO_NO_FBO && pixmap_priv->fbo->fb == 0)
+                    if (glamor_pixmap_ensure_fb(glamor_priv, pixmap_priv->fbo) != 0)
+                        return FALSE;
+            }
+
+            return TRUE;
+        }
+
+
+
+2> 
+        Bool
+        glamor_pixmap_ensure_fbo(PixmapPtr pixmap, GLenum format, int flag)
+        {
+            glamor_screen_private *glamor_priv;
+            glamor_pixmap_private *pixmap_priv;
+            glamor_pixmap_fbo *fbo;
+
+            glamor_priv = glamor_get_screen_private(pixmap->drawable.pScreen);
+            pixmap_priv = glamor_get_pixmap_private(pixmap);
+            if (pixmap_priv->fbo == NULL) {
+
+                fbo = glamor_create_fbo(glamor_priv, pixmap->drawable.width,
+                                        pixmap->drawable.height, format, flag);
+                if (fbo == NULL)
+                    return FALSE;
+
+                glamor_pixmap_attach_fbo(pixmap, fbo);
+            }
+            else {
+                /* We do have a fbo, but it may lack of fb or tex. */
+                if (!pixmap_priv->fbo->tex)
+                    pixmap_priv->fbo->tex =
+                        _glamor_create_tex(glamor_priv, pixmap->drawable.width,
+                                        pixmap->drawable.height, format);
+
+                if (flag != GLAMOR_CREATE_FBO_NO_FBO && pixmap_priv->fbo->fb == 0)
+                    if (glamor_pixmap_ensure_fb(glamor_priv, pixmap_priv->fbo) != 0)
+                        return FALSE;
+            }
+
+            return TRUE;
+        }
+
+
+
+
+2. glamor_font.c
+
+glamor_font_t *
+glamor_font_get(ScreenPtr screen, FontPtr font)
+
+
+3. glamor_picture.c
+
+
+*/Uploads a picture based on a GLAMOR_MEMORY pixmap to a texture in a temporary FBO.*/
+Bool
+glamor_upload_picture_to_texture(PicturePtr picture)

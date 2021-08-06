@@ -1,0 +1,474 @@
+
+（1）modesettingRec, *modesettingPtr
+    typedef struct _modesettingRec {
+        int fd;
+        Bool fd_passed;
+
+        int Chipset;
+        EntityInfoPtr pEnt;                                                     /***driver.c/PreInit
+
+        Bool noAccel;
+        CloseScreenProcPtr CloseScreen;                                         /***driver.c/ScreenInit
+        CreateWindowProcPtr CreateWindow;                                       /***driver.c/ScreenInit   &&  
+        unsigned int SaveGeneration;                                            /***driver.c/PreInit
+
+        CreateScreenResourcesProcPtr createScreenResources;                     /***driver.c/ScreenInit
+        ScreenBlockHandlerProcPtr BlockHandler;                                 /***driver.c/ScreenInit
+        void *driver;
+
+        drmmode_rec drmmode;                                                    /***driver.c/PreInit
+
+        drmEventContext event_context;                                          /***driver.c/ScreenInit/ms_vblank_screen_init
+
+        /**
+        * Page flipping stuff.
+        *  @{
+        */
+        Bool atomic_modeset;                                                    /***driver.c/PreInit
+        Bool pending_modeset;
+        /** @} */
+
+        DamagePtr damage;
+        Bool dirty_enabled;
+
+        uint32_t cursor_width, cursor_height;                                    /***driver.c/PreInit
+
+        Bool has_queue_sequence;
+        Bool tried_queue_sequence;
+
+        Bool kms_has_modifiers;                                                  /***driver.c/PreInit
+
+    } modesettingRec, *modesettingPtr;
+
+
+
+
+
+
+（2）ScrnInfoRec：
+        typedef struct _ScrnInfoRec {
+            int driverVersion;
+            const char *driverName;     /* canonical name used in */
+            /* the config file */
+            ScreenPtr pScreen;          /* Pointer to the ScreenRec */          /***driver.c/ScreenInit
+            int scrnIndex;              /* Number of this screen */
+            Bool configured;            /* Is this screen valid */
+            int origIndex;              /* initial number assigned to
+                                        * this screen before
+                                        * finalising the number of
+                                        * available screens */
+
+            /* Display-wide screenInfo values needed by this screen */
+            int imageByteOrder;
+            int bitmapScanlineUnit;
+            int bitmapScanlinePad;
+            int bitmapBitOrder;
+            int numFormats;
+            PixmapFormatRec formats[MAXFORMATS];
+            PixmapFormatRec fbFormat;
+
+            int bitsPerPixel;           /* fb bpp */
+            int depth;                  /* depth of default visual */               /***driver.c/PreInit
+            MessageType depthFrom;      /* set from config? */
+            MessageType bitsPerPixelFrom;       /* set from config? */
+            rgb weight;                 /* r/g/b weights */                         /***driver.c/PreInit/xf86SetWeight
+            rgb mask;                   /* rgb masks */
+            rgb offset;                 /* rgb offsets */
+            int rgbBits;                /* Number of bits in r/g/b */               /***driver.c/PreInit
+            Gamma gamma;                /* Gamma of the monitor */
+            int defaultVisual;          /* default visual class */                  /***driver.c/PreInit/xf86SetDefaultVisual
+            int virtualX;               /* Virtual width */
+            int virtualY;               /* Virtual height */
+            int xInc;                   /* Horizontal timing increment */
+            int displayWidth;           /* memory pitch */                          /***driver.c/PreInit && /***driver.c/ScreenInit
+            int frameX0;                /* viewport position */
+            int frameY0;
+            int frameX1;
+            int frameY1;
+            int zoomLocked;             /* Disallow mode changes */
+            DisplayModePtr modePool;    /* list of compatible modes */
+            DisplayModePtr modes;       /* list of actual modes */
+            DisplayModePtr currentMode; /* current mode                             /***driver.c/PreInit
+                                        * This was previously
+                                        * overloaded with the modes
+                                        * field, which is a pointer
+                                        * into a circular list */
+            confScreenPtr confScreen;   /* Screen config info */
+            MonPtr monitor;             /* Monitor information */                   /***driver.c/PreInit
+            DispPtr display;            /* Display information */
+            int *entityList;            /* List of device entities */               /***driver.c/PreInit
+            int numEntities;
+            int widthmm;                /* physical display dimensions
+                                        * in mm */
+            int heightmm;
+            int xDpi;                   /* width DPI */
+            int yDpi;                   /* height DPI */
+            const char *name;           /* Name to prefix messages */
+            void *driverPrivate;        /* Driver private area */
+            DevUnion *privates;         /* Other privates can hook in
+                                        * here */
+            DriverPtr drv;              /* xf86DriverList[] entry */
+            void *module;               /* Pointer to module head */
+            int colorKey;
+            int overlayFlags;
+
+            /* Some of these may be moved out of here into the driver private area */
+
+            const char *chipset;        /* chipset name */
+            const char *ramdac;         /* ramdac name */
+            const char *clockchip;      /* clock name */
+            Bool progClock;             /* clock is programmable */                 /***driver.c/PreInit
+            int numClocks;              /* number of clocks */
+            int clock[MAXCLOCKS];       /* list of clock frequencies */
+            int videoRam;               /* amount of video ram (kb) */
+            unsigned long memPhysBase;  /* Physical address of FB */                /***driver.c/ScreenInit
+            unsigned long fbOffset;     /* Offset of FB in the above */             /***driver.c/ScreenInit
+            Bool flipPixels;            /* swap default black/white */
+            void *options;                                                          /***driver.c/PreInit
+
+            /* Allow screens to be enabled/disabled individually */
+            Bool vtSema;                                                            /***driver.c/ScreenInit
+
+            /* hw cursor moves from input thread */
+            Bool silkenMouse;                                                       /***driver.c/PreInit/xf86SetSilkenMouse
+
+            /* Storage for clockRanges and adjustFlags for use with the VidMode ext */
+            ClockRangePtr clockRanges;
+            int adjustFlags;
+
+            /* initial rightof support disable */
+            int                 preferClone;
+
+            Bool is_gpu;
+            uint32_t capabilities;                                                  /***driver.c/PreInit
+
+            int *entityInstanceList;
+            struct pci_device *vgaDev;
+
+            /*
+            * Driver entry points.
+            *
+            */
+
+            xf86ProbeProc *Probe;
+            xf86PreInitProc *PreInit;
+            xf86ScreenInitProc *ScreenInit;
+            xf86SwitchModeProc *SwitchMode;
+            xf86AdjustFrameProc *AdjustFrame;
+            xf86EnterVTProc *EnterVT;
+            xf86LeaveVTProc *LeaveVT;
+            xf86FreeScreenProc *FreeScreen;
+            xf86ValidModeProc *ValidMode;
+            xf86EnableDisableFBAccessProc *EnableDisableFBAccess;
+            xf86SetDGAModeProc *SetDGAMode;
+            xf86ChangeGammaProc *ChangeGamma;
+            xf86PointerMovedProc *PointerMoved;
+            xf86PMEventProc *PMEvent;
+            xf86DPMSSetProc *DPMSSet;
+            xf86LoadPaletteProc *LoadPalette;
+            xf86SetOverscanProc *SetOverscan;
+            xorgDriverFuncProc *DriverFunc;
+            xf86ModeSetProc *ModeSet;
+
+            int reservedInt[NUM_RESERVED_INTS];
+            void *reservedPtr[NUM_RESERVED_POINTERS];
+            funcPointer reservedFuncs[NUM_RESERVED_FUNCS];
+        } ScrnInfoRec;
+
+
+
+
+
+
+
+(3)drmmode_rec, *drmmode_ptr
+        typedef struct {
+            int fd;                                                                     /***driver.c/PreInit
+            unsigned fb_id;
+            drmModeFBPtr mode_fb;
+            int cpp;
+            int kbpp;                                                                   /***driver.c/PreInit
+            ScrnInfoPtr scrn;
+
+            struct gbm_device *gbm;                                                     /***driver.c/ScreenInit
+
+        #ifdef CONFIG_UDEV_KMS
+            struct udev_monitor *uevent_monitor;
+            InputHandlerProc uevent_handler;
+        #endif
+            drmEventContext event_context;
+            drmmode_bo front_bo;
+            Bool sw_cursor;                                                             /***driver.c/PreInit
+
+            /* Broken-out options. */
+            OptionInfoPtr Options;
+
+            Bool glamor;                                                                /***driver.c/PreInit/try_enable_glamor
+            Bool shadow_enable;                                                         /***driver.c/PreInit
+            Bool shadow_enable2;                                                        /***driver.c/PreInit
+            /** Is Option "PageFlip" enabled? */
+            Bool pageflip;                                                              /***driver.c/PreInit
+            Bool force_24_32;                                                           /***driver.c/PreInit
+            void *shadow_fb;                                                            /***driver.c/ScreenInit
+            void *shadow_fb2;
+
+            DevPrivateKeyRec pixmapPrivateKeyRec;
+
+            Bool reverse_prime_offload_mode;                                            /***driver.c/ScreenInit
+
+            Bool is_secondary;
+
+            PixmapPtr fbcon_pixmap;
+
+            Bool dri2_flipping;
+            Bool present_flipping;
+
+            Bool dri2_enable;                                                           /***driver.c/ScreenInit
+            Bool present_enable;                                                        /***driver.c/ScreenInit
+        } drmmode_rec, *drmmode_ptr;
+
+
+    
+
+
+(4)ScreenRec:
+        typedef struct _Screen {
+            int myNum;                  /* index of this instance in Screens[] */       /***driver.c/ScreenInit/xf86SetBackingStore
+            ATOM id;
+            short x, y, width, height;
+            short mmWidth, mmHeight;
+            short numDepths;
+            unsigned char rootDepth;
+            DepthPtr allowedDepths;
+            unsigned long rootVisual;
+            unsigned long defColormap;                                                  /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+            short minInstalledCmaps, maxInstalledCmaps;
+            char backingStoreSupport, saveUnderSupport;                                 /***driver.c/ScreenInit/xf86SetBackingStore
+            unsigned long whitePixel, blackPixel;                                       /***driver.c/ScreenInit   &&  /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen  &&  /***driver.c/ScreenInit/xf86SetBlackWhitePixels
+            GCPtr GCperDepth[MAXFORMATS + 1];
+            /* next field is a stipple to use as default in a GC.  we don't build
+            * default tiles of all depths because they are likely to be of a color
+            * different from the default fg pixel, so we don't win anything by
+            * building a standard one.
+            */
+            PixmapPtr defaultStipple;
+            void *devPrivate;
+            short numVisuals;
+            VisualPtr visuals;
+            WindowPtr root;
+            ScreenSaverStuffRec screensaver;
+
+            DevPrivateSetRec    screenSpecificPrivates[PRIVATE_LAST];
+
+            /* Random screen procedures */
+
+            CloseScreenProcPtr CloseScreen;                                              /***driver.c/ScreenInit  && /***driver.c/ScreenInit/xf86CrtcScreenInit
+            QueryBestSizeProcPtr QueryBestSize;                                          /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+            SaveScreenProcPtr SaveScreen;                                                /***driver.c/ScreenInit  
+            GetImageProcPtr GetImage;                                                    /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+            GetSpansProcPtr GetSpans;                                                    /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+            SourceValidateProcPtr SourceValidate;
+
+            /* Window Procedures */
+
+            CreateWindowProcPtr CreateWindow;                                            /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen    &&                                   
+            DestroyWindowProcPtr DestroyWindow;                                          /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+
+            PositionWindowProcPtr PositionWindow;                                        /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+            ChangeWindowAttributesProcPtr ChangeWindowAttributes;                        /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+            RealizeWindowProcPtr RealizeWindow;                                          /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+            UnrealizeWindowProcPtr UnrealizeWindow;                                      /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+            ValidateTreeProcPtr ValidateTree;
+            PostValidateTreeProcPtr PostValidateTree;
+            WindowExposuresProcPtr WindowExposures;
+            CopyWindowProcPtr CopyWindow;                                                /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+            ClearToBackgroundProcPtr ClearToBackground;
+            ClipNotifyProcPtr ClipNotify;
+            RestackWindowProcPtr RestackWindow;
+            PaintWindowProcPtr PaintWindow;
+
+            /* Pixmap procedures */
+
+            CreatePixmapProcPtr CreatePixmap;                                             /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+            DestroyPixmapProcPtr DestroyPixmap;                                           /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+
+            /* Font procedures */
+
+            RealizeFontProcPtr RealizeFont;
+            UnrealizeFontProcPtr UnrealizeFont;
+
+            /* Cursor Procedures */
+
+            ConstrainCursorProcPtr ConstrainCursor;
+            ConstrainCursorHarderProcPtr ConstrainCursorHarder;
+            CursorLimitsProcPtr CursorLimits;
+            DisplayCursorProcPtr DisplayCursor;
+            RealizeCursorProcPtr RealizeCursor;
+            UnrealizeCursorProcPtr UnrealizeCursor;
+            RecolorCursorProcPtr RecolorCursor;
+            SetCursorPositionProcPtr SetCursorPosition;
+            CursorWarpedToProcPtr CursorWarpedTo;
+            CurserConfinedToProcPtr CursorConfinedTo;
+
+            /* GC procedures */
+
+            CreateGCProcPtr CreateGC;
+
+            /* Colormap procedures */
+
+            CreateColormapProcPtr CreateColormap;
+            DestroyColormapProcPtr DestroyColormap;
+            InstallColormapProcPtr InstallColormap;                                        /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+            UninstallColormapProcPtr UninstallColormap;                                    /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+            ListInstalledColormapsProcPtr ListInstalledColormaps;                          /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+            StoreColorsProcPtr StoreColors;                                                /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+            ResolveColorProcPtr ResolveColor;                                              /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+
+            /* Region procedures */
+
+            BitmapToRegionProcPtr BitmapToRegion;                                          /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+
+            /* os layer procedures */
+
+            ScreenBlockHandlerProcPtr BlockHandler;                                         /***driver.c/ScreenInit  
+            ScreenWakeupHandlerProcPtr WakeupHandler;
+
+            /* anybody can get a piece of this array */
+            PrivateRec *devPrivates;
+
+            CreateScreenResourcesProcPtr CreateScreenResources;                             /***driver.c/ScreenInit
+            ModifyPixmapHeaderProcPtr ModifyPixmapHeader;
+
+            GetWindowPixmapProcPtr GetWindowPixmap;                                         /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+            SetWindowPixmapProcPtr SetWindowPixmap;                                         /***driver.c/ScreenInit/fbScreenInit/fbSetupScreen
+            GetScreenPixmapProcPtr GetScreenPixmap;
+            SetScreenPixmapProcPtr SetScreenPixmap;
+            NameWindowPixmapProcPtr NameWindowPixmap;
+
+            PixmapPtr pScratchPixmap;   /* scratch pixmap "pool" */
+
+            unsigned int totalPixmapSize;
+
+            MarkWindowProcPtr MarkWindow;
+            MarkOverlappedWindowsProcPtr MarkOverlappedWindows;
+            ConfigNotifyProcPtr ConfigNotify;
+            MoveWindowProcPtr MoveWindow;
+            ResizeWindowProcPtr ResizeWindow;
+            GetLayerWindowProcPtr GetLayerWindow;
+            HandleExposuresProcPtr HandleExposures;
+            ReparentWindowProcPtr ReparentWindow;
+
+            SetShapeProcPtr SetShape;
+
+            ChangeBorderWidthProcPtr ChangeBorderWidth;
+            MarkUnrealizedWindowProcPtr MarkUnrealizedWindow;
+
+            /* Device cursor procedures */
+            DeviceCursorInitializeProcPtr DeviceCursorInitialize;
+            DeviceCursorCleanupProcPtr DeviceCursorCleanup;
+
+            /* set it in driver side if X server can copy the framebuffer content.
+            * Meant to be used together with '-background none' option, avoiding
+            * malicious users to steal framebuffer's content if that would be the
+            * default */
+            Bool canDoBGNoneRoot;
+
+            Bool isGPU;
+
+            /* Info on this screen's slaves (if any) */
+            struct xorg_list slave_list;
+            struct xorg_list slave_head;
+            int output_slaves;
+            /* Info for when this screen is a slave */
+            ScreenPtr current_master;
+            Bool is_output_slave;
+            Bool is_offload_slave;
+
+            SharePixmapBackingProcPtr SharePixmapBacking;                                       /***driver.c/ScreenInit
+            SetSharedPixmapBackingProcPtr SetSharedPixmapBacking;                               /***driver.c/ScreenInit
+
+            StartPixmapTrackingProcPtr StartPixmapTracking;                                     /***driver.c/ScreenInit
+            StopPixmapTrackingProcPtr StopPixmapTracking;                                       /***driver.c/ScreenInit
+            SyncSharedPixmapProcPtr SyncSharedPixmap;
+
+            SharedPixmapNotifyDamageProcPtr SharedPixmapNotifyDamage;                           /***driver.c/ScreenInit
+            RequestSharedPixmapNotifyDamageProcPtr RequestSharedPixmapNotifyDamage;             /***driver.c/ScreenInit
+            PresentSharedPixmapProcPtr PresentSharedPixmap;                                     /***driver.c/ScreenInit
+            StopFlippingPixmapTrackingProcPtr StopFlippingPixmapTracking;                       /***driver.c/ScreenInit
+
+            struct xorg_list pixmap_dirty_list;
+
+            ReplaceScanoutPixmapProcPtr ReplaceScanoutPixmap;
+            XYToWindowProcPtr XYToWindow;
+            DPMSProcPtr DPMS;
+        } ScreenRec;
+
+
+
+
+
+
+(5)PictureScreenRec, *PictureScreenPtr:
+        typedef struct _PictureScreen {
+            PictFormatPtr formats;
+            PictFormatPtr fallback;
+            int nformats;
+
+            CreatePictureProcPtr CreatePicture;
+            DestroyPictureProcPtr DestroyPicture;
+            ChangePictureClipProcPtr ChangePictureClip;
+            DestroyPictureClipProcPtr DestroyPictureClip;
+
+            ChangePictureProcPtr ChangePicture;
+            ValidatePictureProcPtr ValidatePicture;
+
+            CompositeProcPtr Composite;                                                         /***driver.c/ScreenInit/fbPictureInit
+            GlyphsProcPtr Glyphs;       /* unused */                                            /***driver.c/ScreenInit/fbPictureInit
+            CompositeRectsProcPtr CompositeRects;                                               /***driver.c/ScreenInit/fbPictureInit
+
+            DestroyWindowProcPtr DestroyWindow;
+            CloseScreenProcPtr CloseScreen;
+
+            StoreColorsProcPtr StoreColors;
+
+            InitIndexedProcPtr InitIndexed;
+            CloseIndexedProcPtr CloseIndexed;
+            UpdateIndexedProcPtr UpdateIndexed;
+
+            int subpixel;
+
+            PictFilterPtr filters;
+            int nfilters;
+            PictFilterAliasPtr filterAliases;
+            int nfilterAliases;
+
+            /**
+            * Called immediately after a picture's transform is changed through the
+            * SetPictureTransform request.  Not called for source-only pictures.
+            */
+            ChangePictureTransformProcPtr ChangePictureTransform;
+
+            /**
+            * Called immediately after a picture's transform is changed through the
+            * SetPictureFilter request.  Not called for source-only pictures.
+            */
+            ChangePictureFilterProcPtr ChangePictureFilter;
+
+            DestroyPictureFilterProcPtr DestroyPictureFilter;
+
+            TrapezoidsProcPtr Trapezoids;                                                         /***driver.c/ScreenInit/fbPictureInit
+            TrianglesProcPtr Triangles;                                                           /***driver.c/ScreenInit/fbPictureInit
+
+            RasterizeTrapezoidProcPtr RasterizeTrapezoid;                                         /***driver.c/ScreenInit/fbPictureInit
+
+            AddTrianglesProcPtr AddTriangles;                                                     /***driver.c/ScreenInit/fbPictureInit
+
+            AddTrapsProcPtr AddTraps;                                                             /***driver.c/ScreenInit/fbPictureInit
+
+            RealizeGlyphProcPtr RealizeGlyph;
+            UnrealizeGlyphProcPtr UnrealizeGlyph;                                                  /***driver.c/ScreenInit/fbPictureInit
+
+        #define PICTURE_SCREEN_VERSION 2
+            TriStripProcPtr TriStrip;
+            TriFanProcPtr TriFan;
+        } PictureScreenRec, *PictureScreenPtr

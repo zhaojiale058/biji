@@ -1,0 +1,196 @@
+
+BIOS开机自检 ——> spelash ——> 操作系统 ——> /boot ——> init进程 ——> 运行级别 ——> /etc/init.d ——> 用户登录 ——> Login shell
+
+1.内核引导
+
+当计算机打开电源后，首先是BIOS开机自检，按照BIOS中设置的启动设备（通常是硬盘）来启动。操作系统接管硬件以后，首先读入 /boot 目录下的内核文件。 
+
+2.运行 init
+
+init 进程是系统所有进程的起点，你可以把它比拟成系统所有进程的老祖宗，没有这个进程，系统中任何进程都不会启动。init 程序首先是需要读取配置文件 /etc/inittab
+
+3.运行级别
+
+许多程序需要开机启动。它们在Windows叫做"服务"（service），在Linux就叫做"守护进程"（daemon）。init进程的一大任务，就是去运行这些开机启动的程序。
+但是，不同的场合需要启动不同的程序，比如用作服务器时，需要启动Apache，用作桌面就不需要。
+Linux允许为不同的场合，分配不同的开机启动程序，这就叫做"运行级别"（runlevel）。也就是说，启动时根据"运行级别"，确定要运行哪些程序
+
+Linux系统有7个运行级别(runlevel)：
+
+    运行级别0：系统停机状态，系统默认运行级别不能设为0，否则不能正常启动
+    运行级别1：单用户工作状态，root权限，用于系统维护，禁止远程登陆
+    运行级别2：多用户状态(没有NFS)
+    运行级别3：完全的多用户状态(有NFS)，登陆后进入控制台命令行模式
+    运行级别4：系统未使用，保留
+    运行级别5：X11控制台，登陆后进入图形GUI模式
+    运行级别6：系统正常关闭并重启，默认运行级别不能设为6，否则不能正常启动
+
+4.系统初始化
+
+在init的配置文件中有这么一行： si::sysinit:/etc/rc.d/rc.sysinit　它调用执行了/etc/rc.d/rc.sysinit，而rc.sysinit是一个bash shell的脚本，
+它主要是完成一些系统初始化的工作，rc.sysinit是每一个运行级别都要首先运行的重要脚本。
+它主要完成的工作有：激活交换分区，检查磁盘，加载硬件模块以及其它一些需要优先执行任务。 
+
+5.建立终端
+
+rc执行完毕后，返回init。这时基本系统环境已经设置好了，各种守护进程也已经启动了。
+init接下来会打开6个终端，以便用户登录系统。在inittab中的以下6行就是定义了6个终端：
+
+1:2345:respawn:/sbin/mingetty tty1
+2:2345:respawn:/sbin/mingetty tty2
+3:2345:respawn:/sbin/mingetty tty3
+4:2345:respawn:/sbin/mingetty tty4
+5:2345:respawn:/sbin/mingetty tty5
+6:2345:respawn:/sbin/mingetty tty6
+
+从上面可以看出在2、3、4、5的运行级别中都将以respawn方式运行mingetty程序，mingetty程序能打开终端、设置模式。
+同时它会显示一个文本登录界面，这个界面就是我们经常看到的登录界面，在这个登录界面中会提示用户输入用户名，而用户输入的用户将作为参数传给login程序来验证用户的身份。
+
+
+
+6.用户登录
+
+ 一般来说，用户的登录方式有三种：
+    （1）命令行登录
+    （2）ssh登录
+    （3）图形界面登录
+
+对于运行级别为 5 的图形方式用户来说，他们的登录是通过一个图形化的登录界面。登录成功后可以直接进入 KDE、Gnome 等窗口管理器。
+而本文主要讲的还是文本方式登录的情况：当我们看到 mingetty 的登录界面时，我们就可以输入用户名和密码来登录系统了。
+Linux 的账号验证程序是 login，login 会接收 mingetty 传来的用户名作为用户名参数。
+然后 login 会对用户名进行分析：如果用户名不是 root，且存在 /etc/nologin 文件，login 将输出 nologin 文件的内容，然后退出。
+这通常用来系统维护时防止非 root 用户登录。只有 /etc/securetty 中登记了的终端才允许 root 用户登录，如果不存在这个文件，则 root 用户可以在任何终端上登录。
+/etc/usertty 文件用于对用户作出附加访问限制，如果不存在这个文件，则没有其他限制。
+
+
+图形系统的启动：
+
+
+本地X客户端 ┐                          ┌ 键盘
+远程X客户端 ┼ X协议 ─ X服务器 ─ 驱动程序  ┼ 鼠标
+远程X客户端 ┘                          └ 显示器    
+
+init 是 linux 的根进程，是所有进程的父进程。同样，Xinit 是所有 Xwindow 进程的根进程。
+命令行下可用 startx 启动图形界面，执行 startx 实际执行的是： xinit /etc/X11/xinit/xinitrc -- /etc/X11/xinit/xserverrc 
+根据脚本 /etc/X11/xinit/xserverrc 启动 Xserver，同时根据脚本 /etc/X11/xinit/xinitrc 启动指定 Xclient 进程，例如窗口管理器  
+/etc/X11/xinit/xserverrc 以预设的参数运行程序 /usr/bin/X11/X
+
+/etc/X11/xinit/xinitrc 脚本则指向 /etc/X11/Xsession ，依次启动 /etc/X11/Xsession.d 目录中的脚本
+您可以在用户配置文件 ~/.Xsession 中定义使用的 WM，它的优先级高于全局配置文件(对于 GDM会话 不起作用)
+startx 启动时，并不会再进行身份认证。因为它启动的是 /etc/X11/Xsession.d/gnome-session ，而不是 GDM会话
+
+很多linux系统启动会自动进入图形界面，不需要 startx 命令在某些启动级别中，包含了 gdm 的启动脚本，例如 ： /etc/rc2.d/S13gdm
+指向 /etc/gdm/gdm-cdd.conf 文件，加载预设视觉主题，启动 /usr/lib/gdm/gdmgreeter（登录屏幕）
+用户身份认证完成后，启动 /etc/X11/default-display-manager 这个文件中设定的默认窗口管理器 /usr/sbin/gdm
+
+gdm 在启动时，会要求用户名和密码，也就是我们看到的登录屏幕（gdmgreeter）
+/usr/share/xsessions 目录下为所有可用登录会话的脚本 
+
+根窗口是由用户态驱动中的代码实现的。
+根窗口是最大的，它可以严严实实的遮挡任何的窗口，为避免这一点，根窗口永远在最底层。
+根窗口不一定只有一个，可根据划分工作区来切换显示多个根窗口，根窗口固定位置放一些其他的 Xclient 的窗口，如：底部面板，顶部面板，侧面板，程序启动图标，
+面板上又可以放置一些其他的 Xclient 窗口，如任务栏，启动栏，菜单...任务条可以以图标显示正在运行的任务，还可以做其他的杂活，如：自动挂载USB设备....
+
+
+
+窗口管理器：
+它只做一件事：管理窗口。它也是一个 Xclient，可以通过杀死该进程来关闭它。使用窗口管理器时，Xserver 并不能直接与其他的 Xclient 通信，需要通过 WM 中转，
+当一些消息被定义为 WM 指令时，它们会被拦截，例如：Alt+F4 关闭窗口、拖动标题栏.....
+1.  提供边框
+2.  增加一些按钮
+3.  调整大小和位置
+4.  安排层叠顺序
+5.  窗口访问便捷操作
+6.  选中活动窗口
+7.  为窗口增加效果
+
+WM 之负责绘制 client 的边框，里面的内容只能由 client 自己绘制，内容更新需要触发 damage 机制
+
+消息“打开链接 linuxtoy.org”，具体内容如下：
+
+输入焦点在地址栏的范围内，“linuxtoy.org”，回车
+
+Xserver 并不能直接判断焦点，而是这样：
+Xserver 向 WM 发送位置和点击的信息，WM 根据当前的“焦点策略”确定激活（最上层）的窗口为 Firefox
+Xserver 将 Firefox 显示在最上层，高亮显示它的标题栏
+在窗口 Firefox 内点击地址栏，或者 Ctrl+L，Xserver 将位置信息发送给 WM，WM 再发送给 Firefox
+Firefox 判断当前焦点后，显示一个闪动的文字输入光标
+Firefox 将输入光标通过 WM 发送给 Xserver，Xserver 在屏幕相应位置进行显示 
+
+Xserver：
+Xwindow 系统服务器端，通过驱动程序（硬件规范）来管理硬件资源。
+
+例如：当我们移动鼠标时，通过驱动程序(大多数鼠标无需专门的驱动程序，它们符合某一硬件规范，例如：有四个移动方向和三个键） ，向 Xserver 发送信息：
+“向右移动200点，向上移动100点”（向右上移动）；“按下左键”……
+
+
+Xserver 作出如下响应：
+上一次鼠标停止的坐标为 600,500
+向右 200，向上 100。现在鼠标位于坐标 800,600
+坐标 800,600 处，为窗口 Firefox 的“关闭”按钮
+根据预设动作，将 “点击 Firefox 窗口的关闭按钮” 翻译为 “关闭窗口 Firefox”
+向X客户端 Firefox 发送一个“退出”消息
+Xserver 通过显示子系统（显卡、显示器），全程显示鼠标的位置和移动
+事实上，向程序发送“退出”信号，通常窗口管理器完成。为了描述方便，这里暂不区分。稍后，我们将向您介绍 窗口管理器 的其它一些细节。
+
+图在桌面上（图片2.png）
+以X server为中心的2D图形系统工作时比较繁琐，例如：在图形程序上点击一个按钮时，evdev驱动捕获到这个信息，通知X server有应用程序需要进行渲染，然后X server查询到
+需要渲染的窗口，然后将“鼠标点击”这个事件通知给需要渲染的窗口对应的程序，这个程序接收到通知后再告诉X server“如何进行渲染”，X server接收到“如何渲染”的消息后
+进行渲染，完成后，通知compositor进行混合，compositor混合完成后通知X server任务完成。这个过程中，X server和应用程序以及X server和compositor之间都有
+双向的通信，这两部分是比较耗时。
+
+
+
+
+Xclient
+
+Xwindow 系统客户端，通过 X协议，实现与 Xserver 的交互。例如：
+Xclient （假设 Firefox） 接收 Xserver 的消息： 输入焦点在地址栏的范围内，“linuxtoy.org”，回车
+Firefox 根据预设动作，将这些消息识别为 “打开链接 linuxtoy.org”
+Firefox 向域名服务器请求 链接 “linuxtoy.org”。域名服务器将这个请求转换为 “http://linuxtoy.org/” 和 IP地址211.148.131.7，发送回 Firefox
+Firefox 将 “http://linuxtoy.org/” 显示在地址栏（向 Xserver 发送请求，在地址栏位置显示这个地址）
+Firefox 向地址 211.148.131.7 请示显示页面
+Firefox 将服务器发送回的页面显示在主窗口中 
+
+
+
+
+字体：
+
+freetype 渲染引擎
+
+作为 Xorg 服务器的一个模块，freetype 的功能包括读取 Truetype 字体信息，如大小、分辨率、编码等，并以之为依据渲染字体 - freetype2.x 相对于 freetype1.x 
+增加了抗锯齿等功能 - ( /etc/X11/xorg.conf 的 Module 字段中，可以选择字体渲染模块 )
+
+freetype 只负责渲染字体。而查找字体，则可以由 X服务器、X客户端 或者 字体服务器来 完成。找到字体后，使用 freetype 引擎进行渲染
+
+X核心字体
+X服务器根据X客户端的请求（字符编码），查找字体并进行渲染，然后显示
+
+Xft字体
+X客户端自行查找字体并进行渲染，X服务器只负责显示。由于 Xft字体 的渲染在客户端完成，所以它可以动态的加载，而不需要随同X服务器一同启动
+
+字体服务器
+当客户端请求字体时，X服务器将请求转发到字体服务器，由字体服务器查找字体，并使用 freetype 引擎渲染，将结果传回X服务器，X服务器进行显示
+
+X核心字体
+
+/etc/X11/xorg.conf 中可以配置X核心字体的搜索路径
+Section "Files"
+FontPath "/usr/X11R6/lib/X11/fonts/misc/"
+FontPath "/usr/X11R6/lib/X11/fonts/Type1/"
+FontPath "/usr/X11R6/lib/X11/fonts/Speedo/"
+FontPath "/usr/X11R6/lib/X11/fonts/100dpi/"
+FontPath "/usr/X11R6/lib/X11/fonts/75dpi/"
+EndSection
+当X客户端向X服务器请求显示文字的时候，X服务器会按上面列表的先后顺序查找字体。显示中文时，如果第一个路径中的字体不包含中文，则查找下面的路径，直到发现中文字体
+请将您偏好的字体放在靠前的位置
+
+
+
+
+
+
+
+
+

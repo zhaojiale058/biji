@@ -1,0 +1,220 @@
+1.开启 debug  ：例如跑 piglit 测试用例
+（1）amd 上： 
+    GALLIUM_DDEBUG=always MESA_LOADER_DRIVER_OVERRIDE=radeonsi
+    LIBGL_DRIVERS_PATH=/home/loongson/backup/mesa_install/lib/dri
+    LD_LIBRARY_PATH=/home/loongson/backup/mesa_install/lib 
+    /home/loongson/code/piglit/bin/glx-multi-window-single-context
+    会在 /home/loongson/ 目录产生一个 ddebug_dumps 目录
+ （2）GSGPU 上： 
+    GSGPU_DEBUG_LEVEL=3
+    MESA_LOADER_DRIVER_OVERRIDE=radeonsi
+    LIBGL_DRIVERS_PATH=/home/loongson/backup/mesa_install/lib/dri
+    LD_LIBRARY_PATH=/home/loongson/backup/mesa_install/lib 
+    /home/loongson/code/piglit/bin/glx-multi-window-single-context
+
+
+
+
+
+
+编译mesa：
+export PKG_CONFIG_PATH=/home/loongson/wang_ucp_change_backup/lib/pkgconfig:$PKG_CONFIG_PATH
+LLVM_CONFIG=/home/loongson/llvm-6_backup/bin/llvm-config ./configure --prefix=/home/loongson/wang_mesa_ucp_backup --with-gallium-drivers=radeonsi  --with-llvm-prefix=/home/loongson/llvm-6_backup/ --with-dri-drivers=""  --enable-osmesa --enable-egl  --disable-gles1 --enable-gles2  --disable-xvmc  --with-egl-platforms=x11,drm --enable-shared-glapi  --enable-gbm --disable-opencl  --enable-texture-float=yes  --enable-llvm --enable-debug
+
+
+
+2.1
+GLX_EXT_visual_info
+（3）GLX_EXT_visual_info 为用户提供一个与GLX visual 相关联的 x visual 类型，允许用户查询在 GLX visual 下面的 x visual 类型。
+
+
+(4)glXSwapBuffers 当且仅当 display 和 drawable 不是属于调用线程当前上下文的那些对象时，它才在X流中；否则它在OpenGL流。
+   glXCopyContext 当且仅当其源上下文与调用线程的当前上下文不同时，该变量才单独存在于X流中；否则它在两条流
+
+
+(5) x 渲染的 surface 叫 drawable  x 提供 2 类 drawable : window(位于屏上) = GLXWindow 
+   和 pixmap（位于屏下）= GLXPixmap  GLX 还一个 GLXPbuffer 没有与 X 对应的东西
+   GLXPbuffer 用于离屏渲染，与 GLXPixmap 有不同的语义，在没有可视的 framebuffer 中更容易
+   申请到它。这些 surface 主要用 GLXFBConfig 来创建的，它描述了 buffer的color depth,type ,数量，
+   和 副buffer（如：） 的大小 ，GLXFBConfig还修复了双缓冲和立体声功能
+   副 buffer 是与 GLXDrawble 相关联的，而不与 context 关联，一个 context 可对应多个drawable
+   
+   drawable和context相适应的情况：
+   1.支持相同的渲染。如：RGBA 或 color index
+   2.有相同depth 的 color buffer 和辅助buffer
+   3.是针对同一个X屏幕创建的
+为了向下兼容 GLX V1.2或更早，渲染context可以用来渲染 window ，于是 GLXDrawable 是个集合
+{GLXWindow,GLXPixmap,GLXPbuffer,Windo}，在 X 中 windows 与 Visual 相关联的。GLX中对
+Visual 的定义包括type，数量，辅助buffer 的大小和指出是否Visual是双缓冲，为了实现向后兼容性，
+还可以使用 visual 来创建 GLXPixmap
+
+
+2.2使用渲染context
+OpenGL 定义了 server state 和 client state，于是渲染 context 要维持这两个 state
+一个线程最多有一个当前 context，a rendering context can be current for only one thread at a time
+客户端负责创建render context 和 drawable
+Opengl 命令能 flash 掉 X 和opengl渲染流。一些state会在Opengl和 x 之间共享。
+打开GL和X之间共享某些状态。将共享X帧缓冲区中的像素值。X双缓冲区扩展(DBE)的定义是缓冲区是当前显示的缓冲区。
+此信息将与GLX共享。两个扩展中显示缓冲区的状态，独立于哪个扩展启动缓冲区交换。
+
+
+2.3直接渲染和地址空间
+X协议的一个基本假设是，如果客户端可以命名一个对象，那么它就可以操作该对象。
+GLX介绍了地址空间的概念。GLX对象不能在其存在的地址空间之外使用。在经典的UNIX环境中，
+每个进程都在自己的地址空间中。在多线程环境中，每个线程将共享一个引用公共数据区域的虚拟地址空间。
+正在呈现到直接连接到正在执行的CPU的图形引擎的一个打开的GL客户端可以避免通过X服务器传递令牌。
+这种概括是出于性能方面的原因。这里描述的模型特别允许这种优化，但不要求任何实现支持它。
+
+发生直接渲染时，开放GL实现的地址空间为直接进程的地址空间；不使用直接渲染时（即发生间接渲染时），
+开放GL实现的地址空间为X服务器的地址空间。客户端有能力拒绝使用直接渲染，但这样做可能会造成性能损失。
+为了使用直接渲染，客户机必须创建直接渲染上下文（见图2.1）。直接呈现上下文的客户端上下文状态和服务器
+上下文状态都存在于客户端的地址空间中；此状态不能由客户端在另一个进程中共享。使用间接呈现上下文，
+客户端上下文状态保持在客户端的地址空间中，而服务器上下文状态保持在X服务器的地址空间中。在这种情况下，
+服务器上下文状态存储在X资源中；它具有关联的XID，并且可能被另一个客户端进程使用。虽然直接渲染支持是可选的，
+但都需要所有的实现来支持间接渲染。
+
+
+2.4 OpenGL 显示列表
+很容易使用 glget 获取 GL 的状态，gl状态用于封装某些物理对象的模型，首先，没有从渲染上下文
+中获取显示列表内容的机制，其次，显示列表可能会很大并且众多。可多个渲染上下文共享显示列表，
+而不是在每个上下文中复制该信息，GLX提供了有限的显示列表共享。由于这些列表是服务器上下文状态的一部分，
+因此只有当共享上下文的服务器状态存在于一个地址空间中时，才能共享它们。使用这种机制，
+可以使用一组列表，例如，通过支持颜色索引渲染的上下文和支持RGBA渲染的上下文。当在打开GL上下文之间共享显示列表时，
+共享仅扩展到显示列表本身以及有关已分配的显示列表编号的信息。特别是，具有gl列表基的基集的值不被共享
+注意，在调用gl结束列表之前，不会创建或取代在gl新列表调用中命名的列表。如果一个渲染上下文与另一个渲染上下文共享一个显示列表，
+则它将在第二个上下文正在重新定义该上下文时继续使用该现有定义。如果一个上下文删除了正在由另一个上下文执行的列表，
+那么第二个上下文将继续执行该列表的旧内容，直到它到达结尾。在销毁上次引用显示上下文之前，将存在一组共享显示列表。
+所有的渲染上下文都可以平等地访问使用列表或定义新的列表。实现共享显示列表必须处理一个渲染上下文正在使用显示列表的情况，
+而另一个渲染上下文会破坏或重新定义该列表。一般来说，打开GL命令并不保证是原子的。gl结束列表和gl删除列表的操作是例外：
+由于执行gl结束列表或gl删除列表而对共享上下文状态的修改是原子的
+
+2.5 纹理对象
+打开的GL纹理状态可以封装在已命名的纹理对象中。通过将未使用的名称绑定到渲染上下文的纹理目标（GL_TEXTURE_1D、GL_TEXTURE_2D或GL_TEXTURE_3D）
+来创建图点纹理对象。绑定纹理对象时，对绑定到的目标的打开GL操作会影响绑定纹理对象，并查询从绑定纹理对象绑定到的目标的返回状态。
+可以通过呈现上下文来共享文本对象，只要上下文的服务器部分共享相同的地址空间。（与显示列表一样，纹理对象是服务器上下文状态的一部分。）
+“打开GL”不会尝试同步化对纹理对象的访问权限。如果一个纹理对象绑定到多个上下文，则由程序员来确保在另一个上下文使用纹理对象进行渲染时，
+不会通过一个上下文更改对象的内容。在使用另一个上下文时更改纹理对象的结果是未定义。由于执行gl绑定纹理而对共享上下文状态进行的所有修改都是原子化的。
+此外，纹理对象不再绑定到任何渲染上下文之前不会被删除。
+
+2.6 多个 Drawable 对齐
+客户端可以在 overlay 层创建一个窗口，在主 plane 中创建第二个。然后独立或协同移动它们，以保持
+它们的对齐。要保持覆盖窗口和主plane窗口的对齐，客户端可以使用以下范例：
+1）创建要共享单个窗口的同一窗口区域子级的窗口（永远不会写入）。调整孩子们的大小和位置，以完全遮挡他们的父母。
+   当必须移动或调整窗口组合的大小时，请对父级组合执行该操作。
+2）使子窗口的背景为“null”，以便在重置子窗口时，X服务器将不会绘制到共享区域中。
+3）选择父窗口中的设备相关事件，而不是子事件。由于在其中一个子窗口中具有焦点的设备相关事件将由父级继承，
+   所以可以直接进行输入调度，而不参考上面的子窗口
+
+
+2.7多线程
+可以创建客户端库的版本，以防止多个线程尝试访问同一连接。这可以通过具有针对锁定显示和解锁显示的适当定义来实现。
+由于执行锁定存在一些性能惩罚，因此无论是提供线程安全版本、非安全版本，还是提供库的两个版本，这都取决于实现。
+中断例程不能与主线程共享连接（因此是渲染上下文）。一个应用程序可以被写成一组合作过程。X具有原子性（在客户端之间）和序列性（在单个客户端内）的请求，
+以限制在解释时可实现的并行性量命令流。GLX放宽了这些要求。序列性仍然在命令流中进行，但不在X和打开GL命令流之间。
+例如，由单个线程客户端在一个打开GL命令之后发出的X命令可能会在该打开GL命令之前执行。
+X规范要求命令是原子化的：如果服务器使用内部并发性实现，则整体效果必须是单个请求以某些序列顺序执行以完成，
+并且来自给定连接的请求必须按交付顺序执行（即总执行顺序是单个流的洗牌）。
+
+打开的GL命令不保证是原子性的。一些打开GL渲染命令可能会损害用户对窗口系统的交互使用。例如，调用深度嵌套显示列表或在没有图形硬件的系统上渲染
+大型纹理映射多边形可以防止用户很快弹出菜单以至于可用。同步已掌握在客户端手中。通过明智地使用gl完成、glgLx等待GL、glx等待X和X同步命令，
+它可以通过维护成本进行维护。只要客户端不排除使用显式同步调用，就可以并行地打开GL和X渲染。即使由X服务器完成渲染，也是如此。因此，多线程X
+服务器实现可以与其他X请求并行地执行打开GL渲染命令。如果在打开GL和X渲染之间进行不必要的切换，可能会出现一些性能下降。这可能涉及到往返到服务器，这可能会很昂贵
+
+3.功能与错误
+
+
+3.3.4 on Screen rendering
+glXCreateWindow:创建一个 GLXWindow 然后返回一个 XID，任何创建的 context 和 GLXFBConfig
+相一致。attrib_list指定了一系列的 window 的属性
+
+
+3.3.5 Off Screen Rendering
+
+GLX 支持 2 种类型的离屏渲染 surface，GLXPixmap 和 GLXPbuffers
+区别：1.GLXPixmap 与 x pixmap 向关联，可用于被 x 渲染，GLXPbuffer 是GLX 的资源，不可能被x或
+      x 的扩展来渲染
+     2.GLXPbuffer的格式以及任何其他辅助缓冲区的颜色缓冲区的类型和大小只能用GLXFBConfig配置描述
+      原有的 x visuals 来配置 GLXDrawable 是不能用的
+     3. 创建的 GLXPbuffer 的内容很容易消失
+     4. 如果 GLX 支持直接渲染的实现，那么必须支持 通过用 GLXPbuffer 来直接渲染 context，尽管一些
+       渲染实现需要支持通过对 GLXPixmap 直接渲染 context。但 GLX 不需要支持这个
+     5.Pbuffer 的目的是实现能够在不可见的framebuffer 内存中分配pbuffer如果框架缓冲区资源不足，
+       GLXPbuffer 的分配可能会失败。（虚拟化pbuffer内存时不需要实现。）此外，客户端应该在不再使用GLXP缓冲区时释放它们，例如，在程序被图像化时
+
+glXCreatePixmap：
+创建一个 offscreen 渲染区域，应先创建一个由 GLXFBConfig 设定想要的深度值 的X pixmap
+然后调用 glxCreatePixmap 会返回个Xid
+pixmap 用于生成的 GLX 屏幕外渲染区域的左前缓冲区的 RGB 平面，GLXpixmap可以使用包含后背缓冲区和立体缓冲区的配置来创建。
+glXDestroyPixmap：调用后会摧毁GLX pixmap ,然后调用 XFreePixmap 来free XFreePixmap
+
+
+glXCreatePbuffer：attrib_list来创建一个pbuffer，创建成功会返回一个 XID，任何 client 知道这个 XID 的都可以使用这个GLXPbuffer
+当前只有四种属性可被指定：GLX_PBUFFER_WIDTH,GLX_PBUFFER_HEIGHT,GLX_PRESERVED_CONTENTS and GLX_LARGEST_PBUFFER.
+attrib_list 可为空，默认的描述如下：GLX_PBUFFER_WIDTH 和 GLX_PBUFFER_HEIGHT
+为矩形pbuffer的pixel的宽高。默认为0.GLX_LARGEST_PBUFFER 可获取可申请的最大的pbuffer
+glXQueryDrawable 可获得申请的 pbuffer 的尺寸，若 GLX_PRESERVED_CONTENTS属性设置为false
+会创建个不被保护的 pbuffer，pbuffer 中的内容可能在任何时间丢失（most likely by swapping out portions of the buffer from the framebuffer to main
+memory）。客户端也可以注册获取一个pbuffer clobber event，当pbuffer内容被保护或damage时
+可通过config来指定 color buffer 和辅助buffer。 可通过 gLXSwapBuffer 交换。pbuffer用的是framebuffer
+资源，因此当不用的时候要记得释放，
+当没设置成保护状态时，由于 framebuffer 资源的冲突，一旦未被保护的 pbuffer 的内容丢失，会被认为是一个
+damaged 状态。不会认为是个错误，但影响渲染，和 pbuffer 被 destory 效果一样：context状态会被更新，但framebuffer的状态变成未定义
+查不出错误，但返回的 pixel 是未定义的。请注意，虽然本规范允许未保存的pbuffer因其他pbuffer活动而损坏，但其目的是只让可见窗口的活动损坏pbuffer
+由于未保存的 pbuffer 的内容可能在只有异步通知的任何情况下丢失(通过pbuffer丢失事件)，因此客户端保证使用glreadpixmap读取有效像素的唯一方法是抓取X服务器。
+（请注意，此操作可能很昂贵，不应经常进行。此外，由于这将锁定其他X客户端，所以应该只在短时间内完成。)不希望这样做的客户端可以通过调用X同步，
+然后检查事件队列中的pbuffer阻塞器事件（假设这些事件已在glReadpixel调用之前退出队列）来检查 glReadpixel 返回的数据是否有效。
+
+3.3.6 查询属性
+glXQueryDrawable：必须设置GLX_WIDTH,GLX_HEIGHT,GLX_PRESERVED_CONTENTS,
+GLX_LARGEST_PBUFFER, or GLX_FBCONFIG_ID 其中之一. 获取GLXDrawable的GLXFBConfig
+首先要获取 GLXFBConfig 的 XID，然后调用glXChooseFBConfig，如果draw是 一个GLXWindow
+或GLXPixmap，而属性设置的是GLX——PRESERVED——CONTENTS 或 GLX_LARGEST_PBUFFER
+那么内容会变成未定义的。
+
+3.3.7 渲染上下文
+glXCreateNewContext：创建失败返回null，成功会将渲染上下文初始化为初始的打开GL状态，并向其返回一个句柄，这个句柄用来处理
+GLX window，GLX pixmap， GLX pbuffer。如果 rander_type是GLX_RGBA_TYPE,那么context支持RGBA渲染
+GLX_COLOR_INDEX_TYPE 支持color index的渲染。
+如果共享列表不是NULL，则除名为0的点纹理对象外，所有显示列表和纹理对象将由共享列表和新创建的渲染上下文共享。
+任意数量的GLX上下文可以共享单个显示列表和纹理对象空间。所有共享上下文的服务器上下文状态必须存在于单个地址空间中，
+否则会生成错误匹配错误。如果直接渲染为真，那么如果实现支持直接渲染，并且连接到本地的X服务器，则将创建直接渲染上下文。
+如果直接为假，则将创建通过X服务器呈现的渲染上下文
+在某些实现中，直接渲染上下文可能是一种稀缺的资源。如果直接为真，并且如果无法创建直接渲染上下文，则glx重新创建新上下文将尝试创建间接上下文。
+新建上下文会生成以下错误：GLX错误上下文GLX呈现上下文；配置无效配置；如果共享列表的服务器上下文状态存在于无法与新建上下文共享
+或共享列表在配置引用的屏幕上创建；如果服务器没有足够的资源分配新上下文，则匹配错误；如果呈现类型未引用有效的呈现类型，则值错误。
+
+glXIsDirect：是否使用OpenGL直接渲染上下文
+
+
+glXMakeContextCurrent：将 Ctx 绑定到当前渲染线程以及绘制和读取绘制对象。draw 会用于所有的 OpenGL 的所有操作，除了
+1.任何的 pixel 数据的读取是基于 GL_READ_BUFFER，累积操作使用GLREAD_BUFFER的值，除非绘制与读取相同,才能使用
+2.任何 depth/stencil 的值都可以用glReadPixels 和 glCopyPixels获取
+
+如果调用线程已经有当前的渲染上下文，那这个context 就会被 flush 掉并标记为不再是当前 context，ctx 会变成当前的 context
+如果draw或read是个GLXPixmap，ctx 之前绑定的是 GLXPbuffer 或者 GLXWindow，就会报错
+
+要释放context而不分配新的context，需将ctx设置为null，并将绘制和读取设置为null，两者其中一个
+一个为null，另一个不为null就会报错。当第一次 make current 时，viewport 和sissor设置为可拉伸的尺寸
+如glviewport（0、0、w、h）和glSissor（0、0、w、h），其中w和h是可拉伸的宽度和高度），但是，当随后使用ctx时，
+不会修改视口和剪刀的尺寸；在这种情况下，客户负责重置视口和剪刀
+请注意，当多个线程使用其当前上下文呈现为相同的可提取性时，打开GL并不能保证片段更新操作的原子性。特别是，
+程序员可能不会假设深度缓冲能够正常工作；读取和更新深度缓冲区的线程之间存在一种竞争条件。客户有责任避免这种情况。
+例如，它们可以使用特定于供应商的扩展，也可以安排单独的线程来绘制框架缓冲区的不联合区域
+
+glXCopyContext：从一个 context 中拷贝 OpenGL 渲染状态到另一个 context，mask 变量表示要拷贝哪组变量的状态
+不是所有的 GL state 都能拷贝，eg：客户端侧的 pixel pack 和 unpack state.vertex array state and
+elect and feedback state, server 端不能拷贝的 state:render mode state,he contents of the
+attribute and matrix stacks, display lists and texture objects.
+可复制的是由 glPushAttrib 操作的 state。
+
+
+
+
+
+
+
+
+
+
+
+

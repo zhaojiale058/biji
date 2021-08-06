@@ -1,0 +1,158 @@
+由于当时的 video card 的内存大小的原因，DRI1 中所有的 screen front buffer and back buffer (also of the ancillary depth buffer and stencil buffer）
+都由 xserver 和 DRI client 所有，所有的这些都直接渲染到 back buffer，然后在 vblack 的时间间隔内与 front buffer 交换，为了渲染到 backbuffer，DRI 进程应确保渲染被裁剪到为其窗口保留的区域
+与X Server 的同步是通过信号和称为 SAREA 的共享内存缓冲区完成的。对 DRM 设备的访问是专有的，因此任何 DRI 客户端都必须在渲染操作开始时将其锁定。同时，该设备的其他用户（包括X Server）被阻止，
+他们不得不等待直到当前渲染操作结束时释放锁为止，即使这两个操作之间没有任何冲突。另一个缺点是，在当前的 DRI 进程释放其对设备的锁定之后，操作无法保留内存分配，因此任何上传到图形内存的数据
+（例如即将执行的操作会丢失纹理，从而对图形性能产生重大影响）。
+
+
+DRI2：
+由于日益普及合成窗口管理器，DRI2 中每个 client 都有自己的私有 backbuffer，以及depth buffer and stencil buffer，而不是共享一个，每个client的backbuffer都是窗口合成器中backbuffer中内容的来源之一，
+窗口合成器合成后在 vblack 的间隔将 backbuffer 与当前正在显示的 frontbuffer 交换。
+新的 DRI2 内部缓冲区管理模型还解决了原始 DRI 实现中存在的两个主要性能瓶颈：
+DRI2 客户端在使用它进行呈现时不再锁定整个 DRM 设备，因为现在每个客户端都获得了一个独立于其他进程的单独的呈现缓冲区。
+DRI2 客户端可以在视频内存中分配自己的缓冲区（带有纹理，顶点列表等），并根据需要保留它们的时间，从而大大减少了视频内存带宽的消耗。
+DRI2 中的offscreen buffer（back buffer, fake front buffer, depth buffer, stencil buffer）都是由 x server 分配的，DRI客户端通过调用DRI2扩展操作检索这些缓冲区，以将其渲染到窗口中。
+
+在内部，DRI2 使用 GEM 名称（一种由 GEM API 提供的全局句柄，允许两个访问 DRM 设备的进程引用同一缓冲区），以通过X11协议将“引用”传递给这些缓冲区。X Server负责窗口的渲染缓冲区的缓冲区分配的原因是，
+GLX 扩展允许多个 X client 在同一窗口中协同进行 OpenGL 渲染。这样，X Server 在整个渲染过程中管理渲染缓冲区的整个生命周期，并知道何时可以安全地回收或丢弃它们。当执行窗口调整大小时，
+X Server 还负责分配与新窗口大小匹配的新渲染缓冲区，并使用 InvalidateBuffers 事件将更改通知到 DRI client 渲染到窗口中，以便它们检索 GEM。新缓冲区的名称
+
+DRI2扩展为DRI客户端提供了其他核心操作，例如找出它们应使用哪个DRM设备和驱动程序（DRI2Connect）或由 X Server 进行身份验证，以便能够使用 DRM 设备的呈现和缓冲功能。 （DRI2Authenticate）。
+使用 DRI2CopyRegion 和 DRI2SwapBuffers 请求在屏幕上呈现呈现的缓冲区。DRI2CopyRegion 可用于在 fake front buffer 和真实的 frontbuffer 之间进行复制，但是它与 vblack 间隔不提供任何同步，因此可能导致撕裂。
+DRI2SwapBuffers 另一方面，如果支持该功能并且两个缓冲区的大小相同，则在 backbuffer 和 frontbuffer 之间执行 VBLANK 同步交换，否则，执行（blit）
+
+
+DRI3
+与 DRI2 相比 DRI3：
+DRI3自己分配 render buffer，不依赖x Server。
+DRI3去掉了旧的基于GEM名称(全局GEM句柄)的不安全的GEM缓冲区共享机制，用于在DRI客户端和X server之间传递缓冲区对象，取而代之的是基于PRIME DMA-BUFs的更安全和通用的机制，它使用文件描述符代替。
+
+由于 buffer 是 client 自己分配的，所以多个GLX app不能在同一个窗口中进行协同渲染，
+DRI客户端在其整个生命周期中都负责自己的缓冲区，这一事实带来了许多优势。例如，对于 DRI3 客户端来说，很容易确保渲染缓冲区的大小始终与窗口的当前大小匹配，从而消除了由于客户端和服务器之间的缓冲区大小缺乏同步而困扰窗口调整大小的伪影在DRI2中。
+也获得了更好的性能，因为现在 DRI3 客户端节省了额外的往返行程，以等待 X Server 发送渲染缓冲区。DRI3 客户端，尤其是合成器窗口管理器，可以利用保留先前帧的旧缓冲区并将其重新使用作为仅渲染窗口的受损部分的基础，这是另一种性能优化的基础。
+不再需要修改 DRI3 扩展以支持新的特定缓冲区格式，因为现在可以直接在 DRI 客户端驱动程序和 DRM 内核驱动程序之间进行处理。另一方面，文件描述符的使用使内核可以对所有未使用的GEM缓冲区对象执行安全清除，一个没有引用的对象。
+
+技术上 DRI3 是由 DRI3 扩展和 Present 扩展组成， DRI3 扩展主要为了实现 DRI 客户端和 X Server 之间共享 direct render 的缓冲区的机制
+DRI 客户端分配和使用 GEM 缓冲区对象作为渲染目标，而 X Server 使用称为“ pixmap”的X11对象类型表示这些渲染缓冲区。DRI3 提供了两种操作DRI3PixmapFromBuffer和DRI3BufferFromPixmap，
+一种用于从 GEM 缓冲区对象（在“ DRI客户空间”中）创建 pixmap（在“ X server空间”中），另一个则相反，并从X像素图中获取GEM缓冲区对象。在这些DRI3操作中，GEM缓冲区对象作为DMA-BUF文件描述符而不是GEM名称传递。
+DRI3 还提供了一种在 DRI 客户端和 X Server 之间共享同步对象的方法，从而允许对共享缓冲区进行序列化访问。与DRI2不同，初始DRI3Open操作（每个DRI客户端必须首先请求知道要使用哪个DRM设备）
+将已打开的文件描述符而不是设备节点文件名返回到设备节点，并且已执行了所有必需的身份验证过程由X Server预先提供。
+
+DRI3 没有提供在屏幕上显示渲染缓冲区的机制，而是依靠另一个扩展程序 Present 扩展程序来实现。Present 之所以这样命名，是因为其主要任务是在屏幕上“呈现”缓冲区，
+这意味着它使用客户端应用程序交付的呈现缓冲区的内容来处理帧缓冲区的更新。屏幕更新必须在适当的时间完成，通常是在 VBLANK 间隔内，以避免出现诸如撕裂之类的显示瑕疵。
+Present 还可以处理屏幕更新到 VBLANK 间隔的同步。它还可以使 X client 知道使用事件在屏幕上真正显示每个缓冲区的瞬间，因此客户端可以将其渲染过程与当前屏幕刷新率同步。
+
+Present 接受任何 X pixmap 作为屏幕更新的源。由于 pixmap 是标准的 X 对象，因此 Present 不仅可以由执行 direct render 的 DRI3 客户端使用，而且可以通过任何方式由 pixmap 上的任何 X client 渲染使用。
+例如，大多数现有的基于非 GL 的 GTK + 和 Qt 应用程序都使用 XRender 进行双缓冲 pixmap 渲染。这些 app 还可以使用 Present 扩展来实现高效且不中断的屏幕更新。这就是为什么 Present 被开发为单独的独立扩展而不是 DRI3 的一部分的原因。
+DRI3 图形性能更好，因为 Present 在交换缓冲区方面比 ​​DRI2 更有效。
+
+Present 为 X client 提供了两个主要操作：使用像素映射（PresentPixmap）的部分或全部内容更新窗口的区域，并设置与要向客户端通知的特定窗口相关的演示事件的类型（PresentSelectInput）。
+窗口可以通过三个演示事件来通知 X client：正在进行的演示操作（通常是从对 PresentPixmap 的调用）已经完成（PresentCompleteNotify），PresentPixmap 操作使用的 pixmap 已完成。
+准备重用（PresentIdleNotify）以及窗口配置（主要是窗口大小）更改时（PresentConfigureNotify）。无论PresentPixmap操作执行直接复制（的blit）到 frontbuffer 或交换与 frontbuffer 中的整个 backbuffer 的是本发明的扩展实现的内部细节，
+而不是明确的选择 X client，与 DRI2 中的一样。
+
+
+dri3 是一个扩展，是对 DRI1,DRI2 的又一次修订，它旨在 在 dma-bufs 和 pixmap之间建立联系
+DMA-BUF 是内核 DMA buffer，pixmap 是 x 渲染的目标，dri3 将这两个链接起来。于是 app 可以向 dma-buffer 中 draw，然后传给 x server 变成内容相同的 pixmap
+dri3 也允许 app 和显示服务器共享同步 object，这样 server 在将图贴到 screen 上之前知道 app 什么时候 write to a buffer 完。
+dri3 需要告诉 client 它应该与哪个渲染设备通信，在 dri2 中文件名通过x协议传递给 client，client打开设备dri2进行身份验证。dri3与之不同
+
+DRI3 Extension：
+● Open
+– X server opens DRM device
+– Prepares for rendering
+– Passes resulting FD back to client
+– Can transparently change to using Render Nodes
+● PixmapFromBuffer
+– Client creates DRM object
+– Maps to DMABuf
+– Passes DMABuf FD to X server
+– X server creates pixmap referencing same DRM object
+● BufferFromPixmap
+– X server maps Pixmap DRM object to DMABuf
+– Passes DMABuf FD to client
+– Client unwraps DMABuf to get DRM object
+● FenceFromFD
+– Client allocates anonymous file with a single page containing futex
+– Passes FD to X server
+– X server maps file and creates an XSyncFence object pointing at it.
+
+
+Present Extension：
+PresentPixmap
+– Provide new content for window in a pixmap
+● PresentNotifyMSC
+– Returns current media counters in an event
+● PresentSelectInput
+– Selects for Present events
+● PresentIdleNotify
+– Event sent when pixmap is free for re-use
+● PresentConfigureNotify
+– Event sent when window size changes
+● PresentCompleteNotify
+– Event sent when PresentRegion operation completes
+
+PresentPixmap
+● Parameters:
+– serial – client-provided number returned in matching
+PresentCompleteNotify
+– valid-area – Region of pixmap containing correct pixels
+– update-area – Region of pixmap containing changed pixels
+– x-off, y-off – offset within window for operation
+– wait-fence – SyncFence which blocks execution
+– options – Set of flags to control execution
+– target-msc, divisor, remainder – parameters defining display time
+– options – cut-through, force copy
+– List of window/serial to notify
+● Supports vblank synchronized sub-window updates.
+● Allow flips even for small updates
+● Separate out completion event from buffer idle event
+
+
+打开请求将打开直接渲染管理器（DRM）设备，并准备进行渲染。如果有多个可用的渲染提供者，则可以选择。
+X server 将把文件描述符传递回打开的设备。当前，这意味着 X server 可以执行身份验证操作，但是一旦 DRM 渲染节点，在内核中可用，
+它可以透明地切换为使用它们。除了文件描述符外，没有其他信息可提供给客户端。libdrm 中有一个函数，该函数采用文件描述符并找出要加载的适当的 Mesa 驱动程序，因此不需要其他信息。
+
+PixmapFromBuffer 和 BufferFromPixmap 是对称操作。对于 PixmapFromBuffer，客户端将创建 dma-buf，并将缓冲区的文件描述符传递给X server。
+然后，server 创建引用该 dma-buf 的 pixmap。BufferFromPixmap 是相反的操作，其中 server 将像素映射DRM对象映射到 dma-buf，并将 dma-buf 的文件描述符发送到客户端。
+
+FenceFromFD 请求根据 client 发送的文件描述符在 server 上创建 XSyncFence 对象。该描述符指向包含 futex 的共享内存页面。
+同步仅在一个方向上：client 可以等待 server 使用 futex 发出信号。能够同时使用这两种方法会很好，但是他不知道如何使单线程 X server 在不阻止其他功能的情况下等待 futex。
+英特尔图形硬件不需要这种同步机制
+
+Present 细节：
+Present 扩展提供三个请求（PresentPixmap，PresentNotifyMSC 和 PresentSelectInput）和三个事件（PresentIdleNotify，PresentConfigureNotify 和 PresentCompleteNotify）。
+PresentPixmap 请求获取一个 pixmap ，并使其成为窗口的内容。PresentNotifyMSC 允许在当前的“媒体流计数器”（MSC）（实质上是帧计数器）达到特定值时请求通知，
+而 PresentSelectInput 选择客户端将接收的 Present 事件。
+
+这些事件包括以下通知：何时可以 free reuse pixmap （PresentIdleNotify），何时更改窗口大小（PresentConfigureNotify）或何时完成 PresentPixmap 操作（PresentCompleteNotify）。
+有人会认为 PresentConfigureNotify 是多余的，因为核心协议 ConfigureNotify 事件给出了相同的指示。但是，Present 扩展无法知道客户端本身是否已请求 ConfigureNotify 事件，
+以便它可以确定是否传递核心事件。因此是一个新事件。
+
+PresentPixmap 参数列表。它包括在匹配的 PresentCompleteNotify 事件中返回的序列号，pixmap 的有效和更新区域（分别是正确和更改像素的区域），x 和 y 偏移量，XSyncFence 对象，选项等。
+该接口支持子窗口区域的 VBLANK 同步更新，即使是较小的更新，它也允许页面翻转。此外，它将演示文稿完成事件与缓冲区空闲事件分开，从而提供了更大的灵活性。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

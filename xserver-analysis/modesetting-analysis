@@ -1,0 +1,525 @@
+显卡用户态驱动功能：
+1.因为各种硬件不同，接口文件也不同。xorg把用户态驱动独立出来。对应的xorg下面，用户态驱动有
+ii  xserver-xorg-video-amdgpu                       
+ii  xserver-xorg-video-ati                         
+ii  xserver-xorg-video-fbdev                         
+ii  xserver-xorg-video-qxl                         
+ii  xserver-xorg-video-radeon                
+ii xserver-xorg-video-vesa                
+等等。
+xserver-xorg-video-fbdev       xserver-xorg-video-vesa  是没有3d功能的，通用性的驱动。
+xserver-xorg-video-ati 是针对amd显卡的，各种功能基本都有。
+我们国产化，也需要实现自己的用户态驱动。而且慢慢完善各种功能。时期稳定，高速，满足
+各种应用场景。
+ 
+ 
+用户态驱动是具体处理linux下面的显卡功能文件。
+/dev/fb0 或者 /dev/dri/card0
+ 
+实现的基本接口为：
+1.初始化的时候，一般需要实现 
+  ms_platform_probe
+以及 
+  PreInit;
+  ScreenInit;
+这几个函数。
+ 
+基本逻辑就是打开/dev/dri/card0文件，得到相关的相关显示流水线的结构体以及他们的属性。
+显示流水线的结构体为 fb -> crtc -> encoder - > connector 。
+一般是逆序得到。 然后得到相关的属性。通过结构体告知xorg层.
+还需要根据xorg的配置要求，分配fb等结构体，然后绑定。
+同事支持pageflip等功能，相关的结构体也挂在xorg上。
+ 
+同时挂载一些函数来支持
+    pScrPriv->rrEnableSharedPixmapFlipping 
+    pScrPriv->rrDisableSharedPixmapFlipping
+    pScrPriv->rrStartFlippingPixmapTracking 
+    pScreen->CloseScreen 
+    pScreen->BlockHandler 
+    pScreen->SharePixmapBacking
+    pScreen->SetSharedPixmapBacking 
+    pScreen->StartPixmapTracking
+    pScreen->StopPixmapTracking
+    pScreen->SharedPixmapNotifyDamage 
+    pScreen->RequestSharedPixmapNotifyDamage
+    pScreen->PresentSharedPixmap
+    pScreen->StopFlippingPixmapTracking 
+    pScreen->CreateScreenResources
+    pScreen->BlockHandler
+ 
+我们国产显卡，可以利用fb或者modesetting这样的以及存在的用户态驱动。
+但是要充分利用我们国产化的性能，需要自己实现xorg用户态驱动和相关功能。
+并且在各种情况下，也能运行稳定。
+ 
+ 
+ 
+ 
+/************************************************************************************************/
+/************************************************************************************************/
+1.GLAMOR_HAS_GBM_LINEAR  功能 需要检查  DRM_CAP_PRIME
+/************************************************************************************************/
+/************************************************************************************************/
+2.驱动中用的drmlib库中的 ioctl等接口分析
+ 
+drmCrtcQueueSequence 就是通过drmIoctl 挂 DRM_IOCTL_CRTC_QUEUE_SEQUENCE
+事件。
+ 
+drm_public int drmCrtcQueueSequence(int fd, uint32_t crtcId, uint32_t flags,
+                                    uint64_t sequence,
+                                    uint64_t *sequence_queued,
+                                    uint64_t user_data)
+{
+    struct drm_crtc_queue_sequence queue_seq;
+    int ret;
+.................
+    ret = drmIoctl(fd, DRM_IOCTL_CRTC_QUEUE_SEQUENCE, &queue_seq);
+.................
+}
+/************************************************************************************************/
+/************************************************************************************************/
+drmWaitVBlank
+drm_public int drmWaitVBlank(int fd, drmVBlankPtr vbl)
+{
+ 
+.............................
+    do {
+       ret = ioctl(fd, DRM_IOCTL_WAIT_VBLANK, vbl);
+       vbl->request.type &= ~DRM_VBLANK_RELATIVE;
+ /* Timeout after 1s */
+ 
+    } while (ret && errno == EINTR);
+ 
+out:
+    return ret;
+}
+drmWaitVBlank循环ioctl检查vblanck，一分钟后结束。
+/************************************************************************************************/
+/************************************************************************************************/
+Property
+所谓Property，其实就是把前几篇的legacy接口传入的参数单独抽出来，做成一个个独立的全局属性。
+通过设置这些属性参数，即可完成对显示参数的设置。
+ 
+Property的结构简单概括主要由3部分组成：name、id 和 value。
+其中id为该property在DRM框架中全局唯一的标识符采用property机制的好处是
+1.减少上层应用接口的维护工作量。当开发者有新的功能需要添加时，无需增加新的函数名和IOCTL，只需在底层驱动中新增一个property，
+然后在自己的应用程序中获取操作该property的值即可。
+2.增强了参数设置的灵活性。一次IOCTL可以同时设置多个property，减少了user space与kernel space切换的次数，同时最大限度的满足了不同硬件对于参数设置的要求，提高了软件效率。
+/*********************************************************************************************************/
+/*********************************************************************************************************/
+下面来研究在没有glamor功能下的代码
+ 
+首先是看看这个pageflip是怎么来实现的哦。
+思路，打断点。但是发现在龙芯集显下面，都没有用哦。
+ 
+/****************************************************************************/
+那先来分析这个机制在modesetting里面怎么实现的。
+怎么分析呢/ 从后向前推导/
+要实现pageflip是哪几个函数呢。龙芯集显二中我们分析了，
+drmModePageFlip 和 drmHandleEvent
+那我们看看这两个函数的调用栈，就啥都明白了吗。
+ 
+当然，在modesetting驱动中，没有像我们简单例子里面完全一样，
+简单pagefiip举例只是调用了event里面的传递的固定函数。
+而modesetting的这个固定函数，确是在处理一个链表。  具体分析看调用过程。
+/*******************************************************************************************************/
+xorg为这这个pagefilp事件的处理，建立了一个机制，来处理这些event。
+通过这个机制的学习，我们将来遇到相似的问题，也能采用这种方案。
+这个机制怎么分析？
+drmModePageFlip 和 drmHandleEvent 的细节和局限性。
+1 .drm_public int drmModePageFlip(int fd, uint32_t crtc_id, uint32_t fb_id,
+		    uint32_t flags, void *user_data)
+/*这个函数，通过user_data，将来让event传递出来，告诉是什么event来了
+* user_data 是event的一个标志，事件的代号。
+* 但是如果处理事件的函数需要多个变量呢，那就是需要调用者自己来设计了。
+ */
+2. drm_public int drmHandleEvent(int fd, drmEventContextPtr evctx)
+/*
+2.1看这个函数实现，是通过读fd的文件，循环处理所有的事件event。
+2.2传入evctx这个结构体：
+在代码里面，只能根据event类型不同，调用不3个不同的函数
+DRM_EVENT_VBLANK  或者  DRM_EVENT_FLIP_COMPLETE 等。
+2.3如果在某一个vblank结束后，有10个事件传来(通过user_data判断不同事件)，（drmModePageFlip设置了10次）。
+每个事件要调用不同的函数，它是做不到的，
+在调用drmHandleEvent之前，你不知道有哪些event啊。
+在调用drmHandleEvent的时候，你的钩子也是只能用evctx里面设置的3个函数了。
+*/
+ 
+针对这个限制。xorg采用的架构是这样的：
+     drmEventContextPtr 结构体中的挂的函数，扫描一个事件列表，每个元素告诉你做什么事情。
+  每个元素有一个handle和对应的date参数。
+一.
+ 1.1  初始化的时候，设置好同一个drmEventContextPtr。
+       如果将来调用drmHandleEvent函数，
+       3个不同的事件，采用3个钩子，挂在drmEventContextPtr 里面。/*比方具体函数ms_drm_handler*/
+ 1.2  SetNotifyFd(ms->fd, ms_drm_socket_handler, X_NOTIFY_READ, screen);
+ SetNotifyFd将在这个fd能读的时候，调用ms_drm_socket_handler 。SetNotifyFd 是xorg提供的机制。
+   ms_drm_socket_handler
+          ->drmHandleEvent(ms->fd, &ms->event_context);
+二.通过调用drmModePageFlip 通知os，将来pageflip完成后发起事件。user_data是个事件标志。
+可以通过ms_drm_queue_alloc来分配一个struct ms_drm_queue挂到ms_drm_queue队列。
+都是用户程序来维护这些结构体。比方说xorg。
+这个结构体记录了哪些信息
+struct ms_drm_queue {
+    struct xorg_list list;  /*挂入链表*/
+    uint32_t seq;   /*每个事件的标志，也就是user_data*/
+    void *data; /*处理函数需要的参数*/
+    ms_drm_handler_proc handler; /*不同event的不同处理函数*/
+                                                       /*都是DRM_EVENT_FLIP_COMPLETE也需要不同的处理函数的 */
+    .......
+};
+三. 当fd能读的时候，就会调用drmHandleEvent(ms->fd, &ms->event_context);
+      然后 drmHandleEvent 会调用event_context 的钩子/*3个类型*/，比方说ms_drm_handler
+   /*drmHandleEvent  会循环调用ms_drm_handler这类钩子，直到处理完所有的事件*/
+四.针对有10个或者多个事件传来(通过user_data判断不同事件，
+钩子函数ms_drm_handler在ms_drm_queue队列中寻找
+ 4.1会通过user_data对应到seq，找到这次真正的event事件。
+ 4.2xorg_list_del(&q->list);
+ 4.3 然后调用handler(data)
+ .... /*这样就是实现了不同的事件(都是DRM_EVENT_FLIP_COMPLETE类型，每个事件都是不一样的)，调用不同的函数，传入不同的data参数*/
+ 
+/*******************************************************************************************************/
+drmmode_SharedPixmapPresent
+    |->drmmode_SharedPixmapFlip
+        |->ms_drm_queue_alloc(crtc, event_args,
+        |                   drmmode_SharedPixmapVBlankEventHandler,
+        |                   drmmode_SharedPixmapVBlankEventAbort);
+        |         ->xorg_list_add(&q->list, &ms_drm_queue);
+        |->drmmode_crtc_flip/**/
+        |    ->drmModePageFlip    
+ 
+调用这个drmmode_SharedPixmapPresent函数有哪些？
+drmmode_SharedPixmapVBlankEventHandler
+   ->drmmode_SharedPixmapPresent
+ 
+ 
+ 
+/***********************************************************************************************/
+/***********************************************************************************************/
+drmmode_InitSharedPixmapFlipping
+   ->drmmode_SharedPixmapPresent
+/*注意这个初始化函数*/
+ 
+drmmode_SharedPixmapFlip
+ 这个不是static的。但是没有glamor的时候，没有调用它/
+/*********************************************************************************************************/
+/*********************************************************************************************************/
+ 
+现在研究下一步。处理event的实际代码。而且处理event的代码，应该要处理xorg的drm_queue吧
+ 
+ms_flush_drm_events
+          ->drmHandleEvent(ms->fd, &ms->event_context);
+ 
+ 
+ms_drm_socket_handler
+          ->drmHandleEvent(ms->fd, &ms->event_context);
+                /*ms->event_context.page_flip_handler 对应指针为ms_drm_handler*/
+ 
+/****************************************************************************************************/
+ms_drm_handler 
+    ->ms_drm_sequence_handler(fd, frame, ((uint64_t) sec * 1000000 + usec) * 1000,
+                            FALSE, (uint32_t) (uintptr_t) user_ptr);
+/*最终要比较队列中的seq和这个参数user_ptr，注意这个user_ptr是drmHandleEvent里面提供的*/
+ 
+static void
+ms_drm_sequence_handler(int fd, uint64_t frame, uint64_t ns, Bool is64bit, uint64_t user_data)
+{
+    struct ms_drm_queue *q, *tmp;
+    uint32_t seq = (uint32_t) user_data;
+ 
+    xorg_list_for_each_entry_safe(q, tmp, &ms_drm_queue, list) {
+        if (q->seq == seq) {
+            uint64_t msc;
+ 
+            msc = ms_kernel_msc_to_crtc_msc(q->crtc, frame, is64bit);
+            xorg_list_del(&q->list);
+            q->handler(msc, ns / 1000, q->data);
+            free(q);
+            break;
+        }
+    }
+} 
+/********************************************************************************************************/
+注意看初始化ms_vblank_screen_init，
+ 1. SetNotifyFd(ms->fd, ms_drm_socket_handler, X_NOTIFY_READ, screen);
+ 来挂起ms_drm_socket_handler 
+  /*SetNotifyFd将在这个fd能读的时候，调用ms_drm_socket_handler 。SetNotifyFd 是xorg提供的机制*/
+2. event_context.page_flip_handler 在哪里赋值，ms->event_context.page_flip_handler = ms_drm_handler;
+3.xorg_list_init(&ms_drm_queue); 这里初始化了总是访问的链表。
+ 
+code  如下:
+Bool
+ms_vblank_screen_init(ScreenPtr screen)
+{
+    ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
+    modesettingPtr ms = modesettingPTR(scrn);
+    modesettingEntPtr ms_ent = ms_ent_priv(scrn);
+    xorg_list_init(&ms_drm_queue);
+ 
+    ms->event_context.version = 4;
+    ms->event_context.vblank_handler = ms_drm_handler;
+    ms->event_context.page_flip_handler = ms_drm_handler;
+    ms->event_context.sequence_handler = ms_drm_sequence_handler_64bit;
+ 
+    /* We need to re-register the DRM fd for the synchronisation
+     * feedback on every server generation, so perform the
+     * registration within ScreenInit and not PreInit.
+     */
+    if (ms_ent->fd_wakeup_registered != serverGeneration) {
+        SetNotifyFd(ms->fd, ms_drm_socket_handler, X_NOTIFY_READ, screen);
+        ms_ent->fd_wakeup_registered = serverGeneration;
+        ms_ent->fd_wakeup_ref = 1;
+    } else
+        ms_ent->fd_wakeup_ref++;
+ 
+    return TRUE;
+}
+/********************************************************************************************************/
+/********************************************************************************************************/
+ 
+下面再整个的分析一下modesetting驱动整体结构。
+通过打断点，观察初始化和运行的时候，都是什么流程。
+我大概总结一下这个驱动。(第一步分析没有glamor的)
+   实际上就是我们写的简单单buffer的大概过程差不多。
+    1，第一步扫描 connect  ->  encoder -> crtc /*流水线的反向*/，找出整个硬件的特点，分配相应的结构体/
+    2，第二部，根据这些硬件状态，按照xorg的配置要求，将这些硬件初始化，对应驱动上的结构体也初始化一下。
+    3，应为要配合xorg，当然按照xorg要求和xorg的归纳，分配和填充相应的结构体，挂起相应的函数指针等。
+/************************************************************************************************************/
+主要概念记录：
+DGA 直接图像访问，应用程序独自占fb，就是应用程序可以全屏显示
+msc  media stamp counter 
+geometric  几何的
+Rasterization  光栅化
+Glyph  字形
+trapezoid  不规则四边形
+Triangles  三角形
+root window  是服务器自动创建的，下面是顶层窗口。
+depth表示啥？一个红黄绿的位数?   24
+bpp 我认为是bit per pixel   是24或者32
+the pitch of the pixmap    表示一行的字节数， width*bpp/8  
+    /*从drmmode_get_default_bpp这个函数可以分析出来。*/
+VT 虚拟终端 <Ctrl>+<Alt>+<Fn>
+   / *比方Option "DontVTSwitch" 屏蔽<Ctrl>+<Alt>+<Fn> 的控制台的切换*/
+VBLANK: 显示器扫描线完成最后一行后,需要重返左上角,这个过程叫做: vblank,也叫VBI(vertical blank interval) ,
+因为扫描线变得blank,以防止看到一个斜线显示在屏幕上.
+/************************************************************************************************************/
+主要结构体：
+ 
+ 
+/************************************************************************************************************/
+1.先观察初始化的时候特点：
+/**************************************************************************************************************/
+断点观察
+1.在dumb_bo_map 打断点
+     当不是glamor的时候，启动的时候，dumb_bo_map的次数，2个cousor，和一个   drmmode_map_front_bo
+/************************************************************************************************************/
+主要函数
+/*dumb_bo.c 文件分析*/
+ 
+就是这个函数新知识而已
+struct dumb_bo * dumb_get_bo_from_fd(int fd, int handle, int pitch, int size)
+{
+    struct dumb_bo *bo;
+    int ret;
+ 
+    bo = calloc(1, sizeof(*bo));
+    if (!bo)
+        return NULL;
+ 
+    ret = drmPrimeFDToHandle(fd, handle, &bo->handle);
+    if (ret) {
+        free(bo);
+        return NULL;
+    }
+    bo->pitch = pitch;
+    bo->size = size;
+    return bo;
+}
+/*函数是入参fd 和handle，出参为bo->handle*/
+ 
+ 
+struct dumb_bo {
+    uint32_t handle;
+    uint32_t size;
+    void *ptr;
+    uint32_t pitch;
+};
+/*这几个函数实现都不用说了，对应龙芯的驱动实现以前也有分析。*/
+struct dumb_bo *dumb_bo_create(int fd, const unsigned width,
+                               const unsigned height, const unsigned bpp);
+int dumb_bo_map(int fd, struct dumb_bo *bo);
+int dumb_bo_destroy(int fd, struct dumb_bo *bo);
+ 
+/************************************************************************************************************/
+drmmode_display.c分析
+ 
+注册register的函数指针
+ 
+static const xf86OutputFuncsRec drmmode_output_funcs = {
+    .dpms = drmmode_output_dpms,
+    .create_resources = drmmode_output_create_resources,
+    .set_property = drmmode_output_set_property,
+    .get_property = drmmode_output_get_property,
+    .detect = drmmode_output_detect,
+    .mode_valid = drmmode_output_mode_valid,
+ 
+    .get_modes = drmmode_output_get_modes,
+    .destroy = drmmode_output_destroy
+};
+ 
+static const xf86CrtcConfigFuncsRec drmmode_xf86crtc_config_funcs = {
+    .resize = drmmode_xf86crtc_resize,
+    .create_lease = drmmode_create_lease,
+    .terminate_lease = drmmode_terminate_lease
+};
+ 
+static const xf86CrtcFuncsRec drmmode_crtc_funcs = {
+    .dpms = drmmode_crtc_dpms,
+    .set_mode_major = drmmode_set_ode_major,
+    .set_cursor_colors = drmmode_set_cursor_colors,
+    .set_cursor_position = drmmode_set_cursor_position,
+    .show_cursor_check = drmmode_show_cursor,
+    .hide_cursor = drmmode_hide_cursor,
+    .load_cursor_argb_check = drmmode_load_cursor_argb_check,
+ 
+    .gamma_set = drmmode_crtc_gamma_set,
+    .destroy = drmmode_crtc_destroy,
+    .set_scanout_pixmap = drmmode_set_scanout_pixmap,
+    .shadow_allocate = drmmode_shadow_allocate,
+    .shadow_create = drmmode_shadow_create,
+    .shadow_destroy = drmmode_shadow_destroy,
+};
+从此可以看出，将display相关的函数，分为crtc和 output两个模块。
+output 结构体有 connect  encoder等结构体。
+ 
+通过这些函数打断点观察。很多没有调用，在没有使用glamor的时候。
+ 
+drmmode_output_create_resources  
+         /*xf86OutputFuncsRec结构体下*/
+注意，在配置好相关的output的软件资源的时候，
+会相应的调用
+            err = RRChangeOutputProperty(output->randr_output, name,XA_INTEGER, 32,  PropModeReplace, 1,&value, FALSE, FALSE);
+                    -> drmmode_output_set_property
+                        -> drmModeConnectorSetProperty
+来设置相应的属性。
+ 
+ 
+static Bool
+drmmode_create_bo(drmmode_ptr drmmode, drmmode_bo *bo,
+                  unsigned width, unsigned height, unsigned bpp)
+ 
+  -> if (drmmode->glamor)  gbm_bo_create
+  ->bo->dumb = dumb_bo_create(drmmode->fd, width, height, bpp);
+ 
+drmmode_get_default_bpp
+测试可以用的bpp和depth。
+ 
+/* create front and cursor BOs */
+Bool
+drmmode_create_initial_bos(ScrnInfoPtr pScrn, drmmode_ptr drmmode)
+  ->drmmode_create_bo(drmmode, &drmmode->front_bo, width, height, bpp)
+  -> drmmode_crtc->cursor_bo =  dumb_bo_create(drmmode->fd, width, height, bpp);
+ 
+drmmode_map_cursor_bos(ScrnInfoPtr pScrn, drmmode_ptr drmmode)
+  ->dumb_bo_map
+/*循环map cursor*/
+ 
+void
+drmmode_copy_fb(ScrnInfoPtr pScrn, drmmode_ptr drmmode)
+仅仅GLAMOR_HAS_GBM宏定义的时候有实现
+/**
+原因
+if(serverGeneration == 1 && bgNoneRoot && ms->drmmode.glamor)
+    CreateWindow_oneshot
+ 
+if里面为调用条件满足，CreateWindow_oneshot-> drmmode_copy_fb
+**/
+ 
+ 
+CreateScreenResources
+ /**调用时机  xf86CrtcCreateScreenResources(xf86Crtc.c:744) -> CreateScreenResources**/
+CreateScreenResources 流程
+1.调用xf86库的createScreenResources，存在指针ms->createScreenResources。
+    pScreen->CreateScreenResources = ms->createScreenResources;
+    ret = pScreen->CreateScreenResources(pScreen);
+2.然后在复原
+    pScreen->CreateScreenResources = CreateScreenResources;
+3.做对应用户态驱动的事情
+ 
+/************************************************************************************************************/
+driver.c分析
+msBlockHandler_oneshot
+   -> msBlockHandler(pScreen, pTimeout);
+         ->ms_dirty_update(pScreen, timeout); /*主要处理这个*/
+   ->drmmode_set_desired_modes(pScrn, &ms->drmmode, TRUE); -> 第一次，需要设置modes
+/*这个函数就是调用一次*/
+ 
+ 
+ pScrPriv->rrEnableSharedPixmapFlipping = msEnableSharedPixmapFlipping;
+     ->drmmode_EnableSharedPixmapFlipping(xf86Crtc, &ms->drmmode,front, back);
+         ->drmmode_set_target_scanout_pixmap
+              ->drmmode_set_target_scanout_pixmap_cpu
+                   -> drmModeAddFB
+ 
+ 
+/*****************************************************************************************/
+/*****************************************************************************************/
+present.c
+static present_screen_info_rec   ms_present_screen_info = {
+    .version = PRESENT_SCREEN_INFO_VERSION,
+ 
+    .get_crtc = ms_present_get_crtc,
+    .get_ust_msc = ms_present_get_ust_msc,
+    .queue_vblank = ms_present_queue_vblank,
+    .abort_vblank = ms_present_abort_vblank,
+    .flush = ms_present_flush,
+ 
+    .capabilities = PresentCapabilityNone,
+ 
+};
+ 
+/*
+ * Called when the queued vblank event has occurred
+ */
+static void
+ms_present_vblank_handler(uint64_t msc, uint64_t usec, void *data)
+{
+    struct ms_present_vblank_event *event = data;
+.........
+    present_event_notify(event->event_id, usec, msc);
+..........
+}
+主要就是将vblank event notiy，present_event_notify
+ 
+ 
+ 
+/*
+ * Queue an event to report back to the Present extension when the specified
+ * MSC has past
+ */
+static int
+ms_present_queue_vblank(RRCrtcPtr crtc,
+                        uint64_t event_id,
+                        uint64_t msc)
+{
+............
+    seq = ms_drm_queue_alloc(xf86_crtc, event,
+                             ms_present_vblank_handler,
+                             ms_present_vblank_abort);
+ 
+    if (!ms_queue_vblank(xf86_crtc, MS_QUEUE_ABSOLUTE, msc, NULL, seq))
+        return BadAlloc;
+................
+    return Success;
+}
+ 
+ 
+ms_drm_queue_alloc
+   ->xorg_list_add(&q->list, &ms_drm_queue);  /*加入上层的list*/
+ 
+ms_queue_vblank
+   ->drmCrtcQueueSequence /*对应内核的drm_crtc_queue_sequence_ioctl，Queue a event for VBLANK sequence*/
+   ->drmWaitVBlank(ms->fd, &vbl);  /*等待vblank事件*/
+   ->ms_flush_drm_events(screen); /*poll后，drmHandleEvent*/
+ 
+ 
+ 
